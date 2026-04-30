@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Optional;
 
 public final class SupabaseRoomsPublisher {
     private static final int CONNECT_TIMEOUT_MS = 3000;
@@ -162,8 +163,15 @@ public final class SupabaseRoomsPublisher {
         }
 
         String directEndpoint = config.hostIp + ":" + hostPort;
-        String publicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs())
-                .orElse(directEndpoint);
+        Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs());
+        String publicEndpoint = stunPublicEndpoint.orElse(directEndpoint);
+
+        if (stunPublicEndpoint.isEmpty()) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] STUN endpoint resolve failed. Fallback to direct endpoint='{}'.",
+                    directEndpoint
+            );
+        }
 
         String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
         String candidates = "[{\"type\":\"direct\",\"endpoint\":\"" + jsonEscape(directEndpoint) + "\"}]";
