@@ -2,6 +2,7 @@ package com.azote.nat_traversal_mod.mixin;
 
 import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.net.ResolvedTarget;
 import com.azote.nat_traversal_mod.net.SupabaseRoomsClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
@@ -9,6 +10,7 @@ import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerNameResolver;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -36,17 +38,17 @@ public class ServerNameResolverMixin {
                 Config.roomName()
         );
 
-        Optional<SupabaseRoomsClient.ResolvedTarget> maybeTarget = SupabaseRoomsClient.resolveRoom();
+        Optional<ResolvedTarget> maybeTarget = SupabaseRoomsClient.resolve();
         if (maybeTarget.isEmpty()) {
             Nat_traversal_mod.LOGGER.warn(
                     "[nat-traversal-mod] Room resolve failed. host='{}'. Continue with original target.",
                     requestedHost
             );
-            notifyPlayerIfConnectAttempt("[NAT] Room resolve failed. Fallback to original target.");
+            natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Room resolve failed. Fallback to original target.");
             return;
         }
 
-        SupabaseRoomsClient.ResolvedTarget target = maybeTarget.get();
+        ResolvedTarget target = maybeTarget.get();
         ResolvedServerAddress resolvedAddress = ResolvedServerAddress.from(new InetSocketAddress(target.hostIp(), target.hostPort()));
 
         Nat_traversal_mod.LOGGER.info(
@@ -55,11 +57,12 @@ public class ServerNameResolverMixin {
                 target.hostPort()
         );
 
-        notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + target.hostIp() + ":" + target.hostPort());
+        natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + target.hostIp() + ":" + target.hostPort());
         cir.setReturnValue(Optional.of(resolvedAddress));
     }
 
-    private static void notifyPlayerIfConnectAttempt(String message) {
+    @Unique
+    private static void natTraversalMod$notifyPlayerIfConnectAttempt(String message) {
         if (!Thread.currentThread().getName().startsWith("Server Connector")) {
             return;
         }

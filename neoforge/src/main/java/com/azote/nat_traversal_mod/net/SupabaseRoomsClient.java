@@ -31,7 +31,19 @@ public final class SupabaseRoomsClient {
     private SupabaseRoomsClient() {
     }
 
-    public static Optional<ResolvedTarget> resolveRoom() {
+    public static Optional<ResolvedTarget> resolve() {
+        if (Config.stunEnabled()) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] stun_enabled=true, but STUN is not implemented yet. stun_server='{}', stun_timeout_ms={}. Using Supabase room resolution.",
+                    Config.stunServer(),
+                    Config.stunTimeoutMs()
+            );
+        }
+
+        return resolveRoom();
+    }
+
+    private static Optional<ResolvedTarget> resolveRoom() {
         String supabaseUrl = Config.supabaseUrl();
         String supabaseKey = Config.supabaseKey();
         String roomName = Config.roomName();
@@ -178,6 +190,4 @@ public final class SupabaseRoomsClient {
         }
     }
 
-    public record ResolvedTarget(String hostIp, int hostPort) {
-    }
 }

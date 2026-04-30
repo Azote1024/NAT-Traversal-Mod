@@ -29,6 +29,8 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - クライアント通知:
   - 接続試行時 (`Server Connector` スレッド) のみ簡易メッセージ表示
 
+データ契約の詳細は `docs/rooms-data-contract.md` を参照してください。
+
 ## 必須項目 (先に実装する項目)
 
 1. ルーム公開の継続性（定期 publish）
@@ -58,8 +60,13 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - `intercept_host`
 - `publish_host_name`
 - `publish_host_ip`
+- `stun_enabled` (将来用、現時点は無効推奨)
+- `stun_server` (将来用)
+- `stun_timeout_ms` (将来用)
 
 `publish_host_ip` はホスト側で必須です（公開IPまたは到達可能IP）。
+
+`stun_*` 設定は先行追加のみで、現時点では実際のSTUN処理は未実装です。
 
 ## 動作確認手順 (最短)
 

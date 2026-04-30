@@ -29,6 +29,18 @@ public class Config {
             .comment("Server-side publish host_ip (public IP or DDNS target)")
             .define("publish_host_ip", "");
 
+    private static final ModConfigSpec.BooleanValue STUN_ENABLED_VALUE = BUILDER
+            .comment("Enable STUN flow (reserved for future implementation)")
+            .define("stun_enabled", false);
+
+    private static final ModConfigSpec.ConfigValue<String> STUN_SERVER_VALUE = BUILDER
+            .comment("Primary STUN server host:port (reserved for future implementation)")
+            .define("stun_server", "stun.l.google.com:19302");
+
+    private static final ModConfigSpec.IntValue STUN_TIMEOUT_MS_VALUE = BUILDER
+            .comment("STUN timeout in milliseconds (reserved for future implementation)")
+            .defineInRange("stun_timeout_ms", 3000, 500, 10000);
+
     static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {
@@ -56,5 +68,17 @@ public class Config {
 
     public static String publishHostIp() {
         return PUBLISH_HOST_IP_VALUE.get().trim();
+    }
+
+    public static boolean stunEnabled() {
+        return STUN_ENABLED_VALUE.get();
+    }
+
+    public static String stunServer() {
+        return STUN_SERVER_VALUE.get().trim();
+    }
+
+    public static int stunTimeoutMs() {
+        return STUN_TIMEOUT_MS_VALUE.get();
     }
 }
