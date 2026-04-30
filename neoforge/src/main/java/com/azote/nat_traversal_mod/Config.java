@@ -41,6 +41,18 @@ public class Config {
             .comment("STUN timeout in milliseconds (reserved for future implementation)")
             .defineInRange("stun_timeout_ms", 3000, 500, 10000);
 
+    private static final ModConfigSpec.ConfigValue<String> RELAY_ENDPOINT_VALUE = BUILDER
+            .comment("Relay endpoint host:port (for self-hosted relay server)")
+            .define("relay_endpoint", "");
+
+    private static final ModConfigSpec.ConfigValue<String> RELAY_TOKEN_VALUE = BUILDER
+            .comment("Relay token used by host/client relay connectors")
+            .define("relay_token", "");
+
+    private static final ModConfigSpec.ConfigValue<String> RELAY_STATUS_VALUE = BUILDER
+            .comment("Relay status: ready or down")
+            .define("relay_status", "down");
+
     static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {
@@ -80,5 +92,17 @@ public class Config {
 
     public static int stunTimeoutMs() {
         return STUN_TIMEOUT_MS_VALUE.get();
+    }
+
+    public static String relayEndpoint() {
+        return RELAY_ENDPOINT_VALUE.get().trim();
+    }
+
+    public static String relayToken() {
+        return RELAY_TOKEN_VALUE.get().trim();
+    }
+
+    public static String relayStatus() {
+        return RELAY_STATUS_VALUE.get().trim();
     }
 }

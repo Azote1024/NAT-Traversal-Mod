@@ -153,11 +153,15 @@ public final class SupabaseRoomsPublisher {
                 "\"host_port\":" + hostPort + "," +
                 "\"status\":\"open\"," +
                 "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
-                appendFutureNatFieldsForOpenRoom(config, hostPort) +
+                appendNatFieldsForOpenRoom(config, hostPort) +
                 "}";
     }
 
-    private static String appendFutureNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
+    private static String appendNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
+        return appendStunFieldsForOpenRoom(config, hostPort) + appendRelayFieldsForOpenRoom();
+    }
+
+    private static String appendStunFieldsForOpenRoom(PublishConfig config, int hostPort) {
         if (!Config.stunEnabled()) {
             return "";
         }
@@ -186,6 +190,51 @@ public final class SupabaseRoomsPublisher {
                 + "\"nat_method\":\"" + jsonEscape(natMethod) + "\","
                 + "\"public_endpoint\":\"" + jsonEscape(publicEndpoint) + "\","
                 + "\"candidates\":" + candidates;
+    }
+
+    private static String appendRelayFieldsForOpenRoom() {
+        String relayEndpoint = Config.relayEndpoint();
+        String relayToken = Config.relayToken();
+        String relayStatus = Config.relayStatus().toLowerCase();
+
+        if (relayStatus.isBlank()) {
+            relayStatus = "down";
+        }
+
+        if (!"ready".equals(relayStatus) && !"down".equals(relayStatus)) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] Invalid relay_status='{}'. Forced to 'down'.",
+                    relayStatus
+            );
+            relayStatus = "down";
+        }
+
+        if ("ready".equals(relayStatus) && (relayEndpoint.isBlank() || relayToken.isBlank())) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] relay_status=ready requires relay_endpoint and relay_token. Forced to 'down'."
+            );
+            relayStatus = "down";
+        }
+
+        if (relayEndpoint.isBlank() && relayToken.isBlank() && "down".equals(relayStatus)) {
+            return "";
+        }
+
+        String relayFields = "";
+        if (!relayEndpoint.isBlank()) {
+            relayFields += ",\"relay_endpoint\":\"" + jsonEscape(relayEndpoint) + "\"";
+        }
+        if (!relayToken.isBlank()) {
+            relayFields += ",\"relay_token\":\"" + jsonEscape(relayToken) + "\"";
+        }
+        relayFields += ",\"relay_status\":\"" + jsonEscape(relayStatus) + "\"";
+
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] Relay publish fields prepared. relay_status='{}', relay_endpoint='{}'",
+                relayStatus,
+                relayEndpoint.isBlank() ? "" : relayEndpoint
+        );
+        return relayFields;
     }
 
     private static PublishConfig loadPublishConfig() {

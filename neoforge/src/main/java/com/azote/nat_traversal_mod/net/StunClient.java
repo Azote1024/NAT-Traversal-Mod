@@ -8,6 +8,7 @@ import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.channels.UnresolvedAddressException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Optional;
@@ -48,9 +49,21 @@ public final class StunClient {
 
             return parseBindingResponse(buffer, responsePacket.getLength(), txId);
         } catch (IOException exception) {
+            if (isUnresolvedAddress(exception)) {
+                Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] STUN request failed: unresolved address. stun_server='{}'", stunServer);
+                return Optional.empty();
+            }
+
             Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] STUN request failed. stun_server='{}'", stunServer, exception);
             return Optional.empty();
         }
+    }
+
+    private static boolean isUnresolvedAddress(IOException exception) {
+        if (exception.getMessage() != null && exception.getMessage().contains("Unresolved address")) {
+            return true;
+        }
+        return exception.getCause() instanceof UnresolvedAddressException;
     }
 
     private static byte[] buildBindingRequest(byte[] txId) {

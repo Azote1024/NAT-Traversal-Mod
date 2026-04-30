@@ -39,20 +39,27 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - 完了: サーバー側 `rooms` publish/close と 60秒定期更新
 - 完了: `updated_at` 180秒鮮度判定
 - 完了: `rooms` データ契約の文書化 (`docs/rooms-data-contract.md`)
-- 未完了: STUN問い合わせと候補交換ロジック
+- 完了: STUN最小実装（publish拡張 + `public_endpoint` 優先解決）
+- 進行中: LAN外安定化（判定ラベル運用）
+- 予定: シンプル中継サーバーソフト構築（`relay-server/`）
 
 ## 直近マイルストーン (再確認)
 
 1. M1: STUN前安定運用（完了）
-2. M2: STUN導入準備（進行中）
+2. M2: STUN導入準備（完了）
    - Resolver境界の維持
    - publisher payload拡張ポイントの維持
-3. M3: STUN最小実装（次）
+3. M3: STUN最小実装（完了）
    - STUN問い合わせ
    - `rooms` への候補反映（後方互換を維持）
-4. M4: LAN外安定化（後続）
+4. M4: LAN外安定化（進行中）
    - テスト結果に基づく調整
-   - 必要時のみ relay/TURN 検討
+5. M5: 友人向け運用固定化（次）
+   - README手順の最小化
+   - 判定ラベル運用の固定
+6. M6: シンプル中継サーバーソフト構築（予定）
+   - `relay-server/` を新規ワークスペースとして利用
+7. M7: UDP hole punching + QUICブリッジ（実験ブランチ）
 
 ## 設定ファイル
 
@@ -68,9 +75,12 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - `intercept_host`
 - `publish_host_name`
 - `publish_host_ip`
-- `stun_enabled` (将来用、現時点は無効推奨)
-- `stun_server` (将来用)
-- `stun_timeout_ms` (将来用)
+- `stun_enabled` (STUN拡張を有効化)
+- `stun_server` (STUNサーバー)
+- `stun_timeout_ms` (STUNタイムアウト)
+- `relay_endpoint` (自前relayの接続先 host:port)
+- `relay_token` (relay接続用トークン)
+- `relay_status` (`ready` or `down`)
 
 `publish_host_ip` はホスト側で必須です（公開IPまたは到達可能IP）。
 
@@ -107,4 +117,7 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot"
 2. STUN候補データ契約の実DB反映（migration追加、対応）
 3. STUN問い合わせの最小実装（無効デフォルトを維持、対応）
 4. 候補反映時の解決優先順位を実装
-5. LAN外テスト結果で最小調整
+5. LAN外テスト結果で最小調整（進行中）
+6. 友人向け運用手順の固定
+7. シンプル中継サーバーソフト構築（`relay-server/`）
+8. UDP hole punching + QUICブリッジを別ブランチで実験
