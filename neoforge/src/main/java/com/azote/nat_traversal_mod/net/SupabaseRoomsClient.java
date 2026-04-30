@@ -11,6 +11,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,6 +25,8 @@ public final class SupabaseRoomsClient {
 
     private static final Pattern HOST_IP_PATTERN = Pattern.compile("\"host_ip\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern HOST_PORT_PATTERN = Pattern.compile("\"host_port\"\\s*:\\s*(\\d+)");
+    private static final Pattern UPDATED_AT_PATTERN = Pattern.compile("\"updated_at\"\\s*:\\s*\"([^\"]+)\"");
+    private static final long ROOM_FRESHNESS_TTL_MILLIS = 180_000L;
 
     private SupabaseRoomsClient() {
     }
@@ -47,22 +52,10 @@ public final class SupabaseRoomsClient {
         }
 
         String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port"
+        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,updated_at"
                 + "&room_name=eq." + encodedRoomName
                 + "&status=eq.open";
 
-        Optional<ResolvedTarget> firstTry = resolveRoomOnce(endpoint, supabaseKey, roomName);
-        if (firstTry.isPresent()) {
-            return firstTry;
-        }
-
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Room resolve retry once. room_name='{}'", roomName);
-        try {
-            Thread.sleep(250L);
-        } catch (InterruptedException interruptedException) {
-            Thread.currentThread().interrupt();
-            return Optional.empty();
-        }
 
         return resolveRoomOnce(endpoint, supabaseKey, roomName);
     }
@@ -86,7 +79,7 @@ public final class SupabaseRoomsClient {
                 return Optional.empty();
             }
 
-            Optional<ResolvedTarget> target = parseResponse(response.body());
+            Optional<ResolvedTarget> target = parseResponse(response.body(), roomName);
             if (target.isEmpty()) {
                 Nat_traversal_mod.LOGGER.warn(
                         "[nat-traversal-mod] Room not found or invalid data. room_name='{}'. Fallback to original target.",
@@ -117,10 +110,11 @@ public final class SupabaseRoomsClient {
         }
     }
 
-    private static Optional<ResolvedTarget> parseResponse(String body) {
+    private static Optional<ResolvedTarget> parseResponse(String body, String roomName) {
         Matcher hostIpMatcher = HOST_IP_PATTERN.matcher(body);
         Matcher hostPortMatcher = HOST_PORT_PATTERN.matcher(body);
-        if (!hostIpMatcher.find() || !hostPortMatcher.find()) {
+        Matcher updatedAtMatcher = UPDATED_AT_PATTERN.matcher(body);
+        if (!hostIpMatcher.find() || !hostPortMatcher.find() || !updatedAtMatcher.find()) {
             return Optional.empty();
         }
 
@@ -144,7 +138,44 @@ public final class SupabaseRoomsClient {
             return Optional.empty();
         }
 
+        String updatedAtRaw = updatedAtMatcher.group(1);
+        Instant updatedAt = parseUpdatedAt(updatedAtRaw, roomName);
+        if (updatedAt == null) {
+            return Optional.empty();
+        }
+
+        long ageMillis = Duration.between(updatedAt, Instant.now()).toMillis();
+        if (ageMillis < 0L || ageMillis > ROOM_FRESHNESS_TTL_MILLIS) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] Room data is stale. room_name='{}', age_ms={}, ttl_ms={}. Fallback to original target.",
+                    roomName,
+                    ageMillis,
+                    ROOM_FRESHNESS_TTL_MILLIS
+            );
+            return Optional.empty();
+        }
+
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] Room data is fresh. room_name='{}', age_ms={}, ttl_ms={}",
+                roomName,
+                ageMillis,
+                ROOM_FRESHNESS_TTL_MILLIS
+        );
+
         return Optional.of(new ResolvedTarget(hostIp, hostPort));
+    }
+
+    private static Instant parseUpdatedAt(String updatedAtRaw, String roomName) {
+        try {
+            return OffsetDateTime.parse(updatedAtRaw).toInstant();
+        } catch (DateTimeParseException exception) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] Invalid updated_at format. room_name='{}', updated_at='{}'. Fallback to original target.",
+                    roomName,
+                    updatedAtRaw
+            );
+            return null;
+        }
     }
 
     public record ResolvedTarget(String hostIp, int hostPort) {

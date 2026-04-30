@@ -4,18 +4,17 @@ import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.time.Instant;
 
 public final class SupabaseRoomsPublisher {
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(3))
-            .build();
+    private static final int CONNECT_TIMEOUT_MS = 3000;
+    private static final int READ_TIMEOUT_MS = 4000;
 
     private SupabaseRoomsPublisher() {
     }
@@ -32,33 +31,48 @@ public final class SupabaseRoomsPublisher {
         }
 
         String endpoint = config.supabaseUrl + "/rest/v1/rooms";
+        String updatedAt = Instant.now().toString();
         String body = "{" +
                 "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," +
                 "\"host_name\":\"" + jsonEscape(config.hostName) + "\"," +
                 "\"host_ip\":\"" + jsonEscape(config.hostIp) + "\"," +
                 "\"host_port\":" + hostPort + "," +
-                "\"status\":\"open\"" +
+                "\"status\":\"open\"," +
+                "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
                 "}";
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-                .timeout(Duration.ofSeconds(4))
-                .header("apikey", config.supabaseKey)
-                .header("Content-Type", "application/json")
-                .header("Prefer", "resolution=merge-duplicates,return=minimal")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
+        RequestResult result = sendJsonRequest(
+                endpoint,
+                "POST",
+                body,
+                config.supabaseKey,
+                "resolution=merge-duplicates,return=minimal"
+        );
 
-        if (sendRequest(request)) {
+        if (result.success) {
             Nat_traversal_mod.LOGGER.info(
                     "[nat-traversal-mod] Room published. room_name='{}' -> {}:{}",
                     config.roomName,
                     config.hostIp,
                     hostPort
             );
+            return;
         }
+
+        Nat_traversal_mod.LOGGER.warn(
+                "[nat-traversal-mod] Room publish failed. status={}, body='{}'",
+                result.statusCode,
+                trimBody(result.body)
+        );
     }
 
-    public static void closeRoom() {
+    public static void closeRoomAsync() {
+        Thread thread = new Thread(SupabaseRoomsPublisher::closeRoom, "nat-traversal-room-close");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static void closeRoom() {
         PublishConfig config = loadPublishConfig();
         if (config == null) {
             return;
@@ -66,18 +80,74 @@ public final class SupabaseRoomsPublisher {
 
         String encodedRoomName = URLEncoder.encode(config.roomName, StandardCharsets.UTF_8);
         String endpoint = config.supabaseUrl + "/rest/v1/rooms?room_name=eq." + encodedRoomName;
-        String body = "{\"status\":\"closed\"}";
+        String updatedAt = Instant.now().toString();
+        String body = "{" +
+                "\"status\":\"closed\"," +
+                "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
+                "}";
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-                .timeout(Duration.ofSeconds(4))
-                .header("apikey", config.supabaseKey)
-                .header("Content-Type", "application/json")
-                .header("Prefer", "return=minimal")
-                .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
-                .build();
+        RequestResult result = sendJsonRequest(
+                endpoint,
+                "PATCH",
+                body,
+                config.supabaseKey,
+                "return=minimal"
+        );
 
-        if (sendRequest(request)) {
+        if (result.success) {
             Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Room closed. room_name='{}'", config.roomName);
+            return;
+        }
+
+        Nat_traversal_mod.LOGGER.warn(
+                "[nat-traversal-mod] Room close failed. status={}, body='{}'",
+                result.statusCode,
+                trimBody(result.body)
+        );
+    }
+
+    private static RequestResult sendJsonRequest(String endpoint, String method, String body, String supabaseKey, String prefer) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+            connection.setRequestMethod(method);
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("apikey", supabaseKey);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Prefer", prefer);
+
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            try (OutputStream outputStream = connection.getOutputStream()) {
+                outputStream.write(bytes);
+            }
+
+            int statusCode = connection.getResponseCode();
+            String responseBody = readBody(connection, statusCode >= 200 && statusCode < 300);
+            boolean success = statusCode >= 200 && statusCode < 300;
+            return new RequestResult(success, statusCode, responseBody);
+        } catch (IOException exception) {
+            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Room publish exception.", exception);
+            return new RequestResult(false, -1, exception.getMessage());
+        } catch (RuntimeException exception) {
+            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Unexpected publish error.", exception);
+            return new RequestResult(false, -1, exception.getMessage());
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static String readBody(HttpURLConnection connection, boolean success) {
+        try (InputStream stream = success ? connection.getInputStream() : connection.getErrorStream()) {
+            if (stream == null) {
+                return "";
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return "";
         }
     }
 
@@ -101,31 +171,6 @@ public final class SupabaseRoomsPublisher {
         return new PublishConfig(supabaseUrl, supabaseKey, roomName, hostName, hostIp);
     }
 
-    private static boolean sendRequest(HttpRequest request) {
-        try {
-            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                return true;
-            }
-
-            Nat_traversal_mod.LOGGER.warn(
-                    "[nat-traversal-mod] Room publish failed. status={}, body='{}'",
-                    response.statusCode(),
-                    trimBody(response.body())
-            );
-            return false;
-        } catch (IOException | InterruptedException exception) {
-            if (exception instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Room publish exception.", exception);
-            return false;
-        } catch (RuntimeException exception) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Unexpected publish error.", exception);
-            return false;
-        }
-    }
-
     private static String jsonEscape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
@@ -142,5 +187,8 @@ public final class SupabaseRoomsPublisher {
     }
 
     private record PublishConfig(String supabaseUrl, String supabaseKey, String roomName, String hostName, String hostIp) {
+    }
+
+    private record RequestResult(boolean success, int statusCode, String body) {
     }
 }

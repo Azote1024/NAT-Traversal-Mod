@@ -17,13 +17,15 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
   - `publish_host_name`, `publish_host_ip` (サーバー側upsert用)
 - Mixin対象: `ServerNameResolver#resolveAddress` (client)
 - Supabase認証: `apikey` ヘッダのみ
-- リトライ: 1回（250ms待機）
+- リトライ: なし（失敗時は即フォールバック）
 - 取得条件: `room_name` 完全一致 + `status=open`
+- 鮮度条件: `updated_at` が 180 秒以内
 - `intercept_host` 比較: 完全一致のみ
 - ホスト側更新:
   - サーバー起動時 publish
   - 60秒ごとの定期 publish
-  - サーバー停止時 `status=closed`
+  - サーバー停止時 `status=closed` (非同期)
+  - publish/close時に `updated_at` を明示更新
 - クライアント通知:
   - 接続試行時 (`Server Connector` スレッド) のみ簡易メッセージ表示
 
@@ -32,12 +34,15 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 1. ルーム公開の継続性（定期 publish）
 2. 停止時クリーンアップ（`status=closed`）
 3. 参加側の可観測性（クライアントメッセージ）
+4. STUN着手前の運用固定（`room_name` 固定、`status` 運用、LAN外試験手順）
 
 ## あるとよい項目 (後で実装)
 
 1. 低コストの短期キャッシュ（数秒）
 2. ホスト側 room 更新の高度化（差分更新、バックオフ）
 3. UI改善（詳細トースト、設定ガイド）
+4. `updated_at` の鮮度判定
+5. STUN用候補アドレスデータ契約
 
 ## 設定ファイル
 
@@ -69,6 +74,7 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - `Room closed` が出る -> 停止時クリーンアップ成功
 - `Intercept hit` が出る -> 参加側で横取り発火
 - `Resolved room target` が出る -> 差し替え成功
+- `Room data is stale` が出る -> ルーム情報が古いためフォールバック
 - `Fallback to original target` が出る -> 取得失敗だが通常接続継続
 
 ## ビルド
@@ -85,3 +91,4 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot"
 2. 必須運用: 定期publish + 停止時close + クライアント通知 (対応)
 3. 次機能: 低コストの短期キャッシュ (数秒)
 4. その次: 更新戦略の高度化
+5. STUN問い合わせ実装（候補交換の最小スコープ）

@@ -46,7 +46,7 @@ public class Nat_traversal_mod {
 
     private void onServerStopping(ServerStoppingEvent event) {
         stopPeriodicPublish();
-        SupabaseRoomsPublisher.closeRoom();
+        SupabaseRoomsPublisher.closeRoomAsync();
     }
 
     private void startPeriodicPublish(int serverPort) {
