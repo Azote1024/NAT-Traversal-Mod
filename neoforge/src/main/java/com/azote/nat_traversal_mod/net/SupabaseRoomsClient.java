@@ -25,6 +25,7 @@ public final class SupabaseRoomsClient {
 
     private static final Pattern HOST_IP_PATTERN = Pattern.compile("\"host_ip\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern HOST_PORT_PATTERN = Pattern.compile("\"host_port\"\\s*:\\s*(\\d+)");
+    private static final Pattern PUBLIC_ENDPOINT_PATTERN = Pattern.compile("\"public_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern UPDATED_AT_PATTERN = Pattern.compile("\"updated_at\"\\s*:\\s*\"([^\"]+)\"");
     private static final long ROOM_FRESHNESS_TTL_MILLIS = 180_000L;
 
@@ -32,18 +33,6 @@ public final class SupabaseRoomsClient {
     }
 
     public static Optional<ResolvedTarget> resolve() {
-        if (Config.stunEnabled()) {
-            Nat_traversal_mod.LOGGER.warn(
-                    "[nat-traversal-mod] stun_enabled=true, but STUN is not implemented yet. stun_server='{}', stun_timeout_ms={}. Using Supabase room resolution.",
-                    Config.stunServer(),
-                    Config.stunTimeoutMs()
-            );
-        }
-
-        return resolveRoom();
-    }
-
-    private static Optional<ResolvedTarget> resolveRoom() {
         String supabaseUrl = Config.supabaseUrl();
         String supabaseKey = Config.supabaseKey();
         String roomName = Config.roomName();
@@ -64,7 +53,7 @@ public final class SupabaseRoomsClient {
         }
 
         String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,updated_at"
+        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,public_endpoint,updated_at"
                 + "&room_name=eq." + encodedRoomName
                 + "&status=eq.open";
 
@@ -174,7 +163,83 @@ public final class SupabaseRoomsClient {
                 ROOM_FRESHNESS_TTL_MILLIS
         );
 
+        Optional<ResolvedTarget> publicEndpointTarget = parsePublicEndpoint(body, roomName);
+        if (publicEndpointTarget.isPresent()) {
+            return publicEndpointTarget;
+        }
+
+        if (Config.stunEnabled()) {
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] public_endpoint is not used. room_name='{}'. Fallback to host_ip:host_port.",
+                    roomName
+            );
+        }
+
         return Optional.of(new ResolvedTarget(hostIp, hostPort));
+    }
+
+    private static Optional<ResolvedTarget> parsePublicEndpoint(String body, String roomName) {
+        Matcher publicEndpointMatcher = PUBLIC_ENDPOINT_PATTERN.matcher(body);
+        if (!publicEndpointMatcher.find()) {
+            if (Config.stunEnabled()) {
+                Nat_traversal_mod.LOGGER.info(
+                        "[nat-traversal-mod] public_endpoint key is missing in room payload. room_name='{}'.",
+                        roomName
+                );
+            }
+            return Optional.empty();
+        }
+
+        String publicEndpoint = publicEndpointMatcher.group(1).trim();
+        if (publicEndpoint.isEmpty()) {
+            if (Config.stunEnabled()) {
+                Nat_traversal_mod.LOGGER.info(
+                        "[nat-traversal-mod] public_endpoint is empty. room_name='{}'.",
+                        roomName
+                );
+            }
+            return Optional.empty();
+        }
+
+        String[] parts = publicEndpoint.split(":", 2);
+        if (parts.length != 2) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] Invalid public_endpoint format. room_name='{}', public_endpoint='{}'. Ignore public_endpoint.",
+                    roomName,
+                    publicEndpoint
+            );
+            return Optional.empty();
+        }
+
+        String endpointHost = parts[0].trim();
+        int endpointPort;
+        try {
+            endpointPort = Integer.parseInt(parts[1].trim());
+        } catch (NumberFormatException ignored) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] Invalid public_endpoint port. room_name='{}', public_endpoint='{}'. Ignore public_endpoint.",
+                    roomName,
+                    publicEndpoint
+            );
+            return Optional.empty();
+        }
+
+        if (endpointHost.isBlank() || endpointPort < 1 || endpointPort > 65535) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] Invalid public_endpoint value. room_name='{}', public_endpoint='{}'. Ignore public_endpoint.",
+                    roomName,
+                    publicEndpoint
+            );
+            return Optional.empty();
+        }
+
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] Use public_endpoint from room. room_name='{}', target='{}:{}'",
+                roomName,
+                endpointHost,
+                endpointPort
+        );
+        return Optional.of(new ResolvedTarget(endpointHost, endpointPort));
     }
 
     private static Instant parseUpdatedAt(String updatedAtRaw, String roomName) {

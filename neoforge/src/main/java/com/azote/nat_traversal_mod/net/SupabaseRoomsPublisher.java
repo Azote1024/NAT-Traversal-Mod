@@ -32,14 +32,7 @@ public final class SupabaseRoomsPublisher {
 
         String endpoint = config.supabaseUrl + "/rest/v1/rooms";
         String updatedAt = Instant.now().toString();
-        String body = "{" +
-                "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," +
-                "\"host_name\":\"" + jsonEscape(config.hostName) + "\"," +
-                "\"host_ip\":\"" + jsonEscape(config.hostIp) + "\"," +
-                "\"host_port\":" + hostPort + "," +
-                "\"status\":\"open\"," +
-                "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
-                "}";
+        String body = buildOpenRoomBody(config, hostPort, updatedAt);
 
         RequestResult result = sendJsonRequest(
                 endpoint,
@@ -149,6 +142,42 @@ public final class SupabaseRoomsPublisher {
         } catch (IOException ignored) {
             return "";
         }
+    }
+
+    private static String buildOpenRoomBody(PublishConfig config, int hostPort, String updatedAt) {
+        return "{" +
+                "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," +
+                "\"host_name\":\"" + jsonEscape(config.hostName) + "\"," +
+                "\"host_ip\":\"" + jsonEscape(config.hostIp) + "\"," +
+                "\"host_port\":" + hostPort + "," +
+                "\"status\":\"open\"," +
+                "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
+                appendFutureNatFieldsForOpenRoom(config, hostPort) +
+                "}";
+    }
+
+    private static String appendFutureNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
+        if (!Config.stunEnabled()) {
+            return "";
+        }
+
+        String directEndpoint = config.hostIp + ":" + hostPort;
+        String publicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs())
+                .orElse(directEndpoint);
+
+        String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
+        String candidates = "[{\"type\":\"direct\",\"endpoint\":\"" + jsonEscape(directEndpoint) + "\"}]";
+
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",
+                natMethod,
+                publicEndpoint
+        );
+
+        return ","
+                + "\"nat_method\":\"" + jsonEscape(natMethod) + "\","
+                + "\"public_endpoint\":\"" + jsonEscape(publicEndpoint) + "\","
+                + "\"candidates\":" + candidates;
     }
 
     private static PublishConfig loadPublishConfig() {

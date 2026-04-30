@@ -2,8 +2,8 @@ package com.azote.nat_traversal_mod.mixin;
 
 import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.net.ConnectionTargetResolver;
 import com.azote.nat_traversal_mod.net.ResolvedTarget;
-import com.azote.nat_traversal_mod.net.SupabaseRoomsClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
@@ -38,7 +38,7 @@ public class ServerNameResolverMixin {
                 Config.roomName()
         );
 
-        Optional<ResolvedTarget> maybeTarget = SupabaseRoomsClient.resolve();
+        Optional<ResolvedTarget> maybeTarget = ConnectionTargetResolver.resolve();
         if (maybeTarget.isEmpty()) {
             Nat_traversal_mod.LOGGER.warn(
                     "[nat-traversal-mod] Room resolve failed. host='{}'. Continue with original target.",

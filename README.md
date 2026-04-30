@@ -20,6 +20,7 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - リトライ: なし（失敗時は即フォールバック）
 - 取得条件: `room_name` 完全一致 + `status=open`
 - 鮮度条件: `updated_at` が 180 秒以内
+- `public_endpoint` が有効なら優先採用、なければ `host_ip:host_port`
 - `intercept_host` 比較: 完全一致のみ
 - ホスト側更新:
   - サーバー起動時 publish
@@ -30,21 +31,28 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
   - 接続試行時 (`Server Connector` スレッド) のみ簡易メッセージ表示
 
 データ契約の詳細は `docs/rooms-data-contract.md` を参照してください。
+全体マイルストーンは `docs/milestones.md` を参照してください。
 
-## 必須項目 (先に実装する項目)
+## 現状ステータス
 
-1. ルーム公開の継続性（定期 publish）
-2. 停止時クリーンアップ（`status=closed`）
-3. 参加側の可観測性（クライアントメッセージ）
-4. STUN着手前の運用固定（`room_name` 固定、`status` 運用、LAN外試験手順）
+- 完了: `intercept_host` 横取り / Supabase解決 / 失敗時フォールバック
+- 完了: サーバー側 `rooms` publish/close と 60秒定期更新
+- 完了: `updated_at` 180秒鮮度判定
+- 完了: `rooms` データ契約の文書化 (`docs/rooms-data-contract.md`)
+- 未完了: STUN問い合わせと候補交換ロジック
 
-## あるとよい項目 (後で実装)
+## 直近マイルストーン (再確認)
 
-1. 低コストの短期キャッシュ（数秒）
-2. ホスト側 room 更新の高度化（差分更新、バックオフ）
-3. UI改善（詳細トースト、設定ガイド）
-4. `updated_at` の鮮度判定
-5. STUN用候補アドレスデータ契約
+1. M1: STUN前安定運用（完了）
+2. M2: STUN導入準備（進行中）
+   - Resolver境界の維持
+   - publisher payload拡張ポイントの維持
+3. M3: STUN最小実装（次）
+   - STUN問い合わせ
+   - `rooms` への候補反映（後方互換を維持）
+4. M4: LAN外安定化（後続）
+   - テスト結果に基づく調整
+   - 必要時のみ relay/TURN 検討
 
 ## 設定ファイル
 
@@ -66,7 +74,8 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 
 `publish_host_ip` はホスト側で必須です（公開IPまたは到達可能IP）。
 
-`stun_*` 設定は先行追加のみで、現時点では実際のSTUN処理は未実装です。
+`stun_*` は最小STUN実装を含みますが、`stun_enabled=true` で使う場合は
+`supabase/migrations/20260501061000_add_stun_candidate_columns.sql` の適用が前提です。
 
 ## 動作確認手順 (最短)
 
@@ -94,8 +103,8 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot"
 
 ## 最短ロードマップ
 
-1. MVP安定化: 接続ログ整備 (完了)
-2. 必須運用: 定期publish + 停止時close + クライアント通知 (対応)
-3. 次機能: 低コストの短期キャッシュ (数秒)
-4. その次: 更新戦略の高度化
-5. STUN問い合わせ実装（候補交換の最小スコープ）
+1. STUN前安定運用の維持（現状完了）
+2. STUN候補データ契約の実DB反映（migration追加、対応）
+3. STUN問い合わせの最小実装（無効デフォルトを維持、対応）
+4. 候補反映時の解決優先順位を実装
+5. LAN外テスト結果で最小調整
