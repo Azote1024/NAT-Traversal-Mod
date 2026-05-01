@@ -155,6 +155,7 @@ public final class SupabaseRoomsPublisher {
                 "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
                 appendRelayFieldsForOpenRoom(config) +
                 appendNatFieldsForOpenRoom(config, hostPort) +
+                appendCandidatesForOpenRoom(config, hostPort) +
                 "}";
     }
 
@@ -182,7 +183,6 @@ public final class SupabaseRoomsPublisher {
         }
 
         String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
-        String candidates = "[{\"type\":\"direct\",\"endpoint\":\"" + jsonEscape(directEndpoint) + "\"}]";
 
         Nat_traversal_mod.LOGGER.info(
                 "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",
@@ -192,8 +192,23 @@ public final class SupabaseRoomsPublisher {
 
         return ","
                 + "\"nat_method\":\"" + jsonEscape(natMethod) + "\","
-                + "\"public_endpoint\":\"" + jsonEscape(publicEndpoint) + "\","
-                + "\"candidates\":" + candidates;
+                + "\"public_endpoint\":\"" + jsonEscape(publicEndpoint) + "\"";
+    }
+
+    private static String appendCandidatesForOpenRoom(PublishConfig config, int hostPort) {
+        String directEndpoint = config.hostIp + ":" + hostPort;
+        String quicEndpoint = config.quicEndpoint;
+        String quicStatus = config.quicStatus;
+
+        String candidates = "{" +
+                "\"direct_endpoint\":\"" + jsonEscape(directEndpoint) + "\"," +
+                "\"quic_endpoint\":\"" + jsonEscape(quicEndpoint) + "\"," +
+                "\"quic_status\":\"" + jsonEscape(quicStatus) + "\"," +
+                "\"quic_attempts\":" + Config.quicAttempts() + "," +
+                "\"quic_attempt_interval_ms\":" + Config.quicAttemptIntervalMs() +
+                "}";
+
+        return ",\"candidates\":" + candidates;
     }
 
 
@@ -206,6 +221,8 @@ public final class SupabaseRoomsPublisher {
         String relayEndpoint = Config.relayPublishEndpoint();
         String relayToken = Config.relayToken();
         String relayStatus = Config.relayStatus();
+        String quicEndpoint = Config.quicPublishEndpoint();
+        String quicStatus = Config.quicStatus();
 
         if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
             Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Skip room publish: supabase config is incomplete.");
@@ -217,7 +234,7 @@ public final class SupabaseRoomsPublisher {
             return null;
         }
 
-        return new PublishConfig(supabaseUrl, supabaseKey, roomName, hostName, hostIp, relayEndpoint, relayToken, relayStatus);
+        return new PublishConfig(supabaseUrl, supabaseKey, roomName, hostName, hostIp, relayEndpoint, relayToken, relayStatus, quicEndpoint, quicStatus);
     }
 
     private static String jsonEscape(String value) {
@@ -243,7 +260,9 @@ public final class SupabaseRoomsPublisher {
             String hostIp,
             String relayEndpoint,
             String relayToken,
-            String relayStatus
+            String relayStatus,
+            String quicEndpoint,
+            String quicStatus
     ) {
     }
 

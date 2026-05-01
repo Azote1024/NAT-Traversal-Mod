@@ -55,7 +55,7 @@ public final class SupabaseRoomsClient {
         }
 
         String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,public_endpoint,relay_endpoint,relay_status,updated_at"
+        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,public_endpoint,relay_endpoint,relay_status,candidates,updated_at"
                 + "&room_name=eq." + encodedRoomName
                 + "&status=eq.open";
 
@@ -165,7 +165,22 @@ public final class SupabaseRoomsClient {
                 ROOM_FRESHNESS_TTL_MILLIS
         );
 
-        if (Config.relayFirstMode()) {
+        if (Config.quicFirstMode()) {
+            Optional<ResolvedTarget> quicTarget = QuicP2pManager.tryResolveFromRoom(body, roomName);
+            if (quicTarget.isPresent()) {
+                return quicTarget;
+            }
+
+            Optional<ResolvedTarget> relayEndpointTarget = parseRelayEndpoint(body, roomName);
+            if (relayEndpointTarget.isPresent()) {
+                return relayEndpointTarget;
+            }
+
+            Optional<ResolvedTarget> publicEndpointTarget = parsePublicEndpoint(body, roomName);
+            if (publicEndpointTarget.isPresent()) {
+                return publicEndpointTarget;
+            }
+        } else if (Config.relayFirstMode()) {
             Nat_traversal_mod.LOGGER.info(
                     "[nat-traversal-mod] relay_priority_mode=relay_first. Try relay endpoint before public_endpoint. room_name='{}'.",
                     roomName

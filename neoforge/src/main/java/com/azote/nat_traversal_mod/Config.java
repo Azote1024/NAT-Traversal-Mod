@@ -64,6 +64,14 @@ public class Config {
             .comment("Relay status: ready or down")
             .define("relay_status", "down");
 
+    private static final ModConfigSpec.ConfigValue<String> QUIC_PUBLISH_ENDPOINT_VALUE = SERVER_BUILDER
+            .comment("QUIC endpoint written to rooms (publicly reachable host:port)")
+            .define("quic_publish_endpoint", "");
+
+    private static final ModConfigSpec.ConfigValue<String> QUIC_STATUS_VALUE = SERVER_BUILDER
+            .comment("QUIC status: ready or down")
+            .define("quic_status", "down");
+
     private static final ModConfigSpec.BooleanValue RELAY_CLIENT_CONNECTOR_ENABLED_VALUE = CLIENT_BUILDER
             .comment("Enable local relay client connector path")
             .define("relay_client_connector_enabled", false);
@@ -73,8 +81,28 @@ public class Config {
             .defineInRange("relay_client_local_port", 26667, 1, 65535);
 
     private static final ModConfigSpec.ConfigValue<String> RELAY_PRIORITY_MODE_VALUE = CLIENT_BUILDER
-            .comment("Relay route priority mode: public_first or relay_first")
+            .comment("Route priority mode: public_first, relay_first, or quic_first")
             .define("relay_priority_mode", "public_first");
+
+    private static final ModConfigSpec.BooleanValue QUIC_ENABLED_VALUE = CLIENT_BUILDER
+            .comment("Enable QUIC P2P route")
+            .define("quic_enabled", true);
+
+    private static final ModConfigSpec.IntValue QUIC_ATTEMPTS_VALUE = CLIENT_BUILDER
+            .comment("Number of QUIC attempts before fallback")
+            .defineInRange("quic_attempts", 3, 1, 10);
+
+    private static final ModConfigSpec.IntValue QUIC_ATTEMPT_INTERVAL_MS_VALUE = CLIENT_BUILDER
+            .comment("Delay between QUIC attempts in milliseconds")
+            .defineInRange("quic_attempt_interval_ms", 700, 100, 5000);
+
+    private static final ModConfigSpec.ConfigValue<String> QUIC_TLS_MODE_VALUE = CLIENT_BUILDER
+            .comment("QUIC TLS mode: ca_or_pinned or insecure_trust_all")
+            .define("quic_tls_mode", "ca_or_pinned");
+
+    private static final ModConfigSpec.ConfigValue<String> QUIC_CERT_FINGERPRINT_SHA256_VALUE = CLIENT_BUILDER
+            .comment("Pinned SHA-256 cert fingerprint for self-signed mode")
+            .define("quic_cert_fingerprint_sha256", "");
 
     static final ModConfigSpec COMMON_SPEC = COMMON_BUILDER.build();
     static final ModConfigSpec SERVER_SPEC = SERVER_BUILDER.build();
@@ -139,6 +167,14 @@ public class Config {
         return RELAY_STATUS_VALUE.get().trim();
     }
 
+    public static String quicPublishEndpoint() {
+        return QUIC_PUBLISH_ENDPOINT_VALUE.get().trim();
+    }
+
+    public static String quicStatus() {
+        return QUIC_STATUS_VALUE.get().trim();
+    }
+
     public static boolean relayClientConnectorEnabled() {
         return RELAY_CLIENT_CONNECTOR_ENABLED_VALUE.get();
     }
@@ -149,7 +185,7 @@ public class Config {
 
     public static String relayPriorityMode() {
         String mode = RELAY_PRIORITY_MODE_VALUE.get().trim().toLowerCase();
-        if (mode.equals("relay_first") || mode.equals("public_first")) {
+        if (mode.equals("relay_first") || mode.equals("public_first") || mode.equals("quic_first")) {
             return mode;
         }
         return "public_first";
@@ -157,6 +193,34 @@ public class Config {
 
     public static boolean relayFirstMode() {
         return "relay_first".equals(relayPriorityMode());
+    }
+
+    public static boolean quicFirstMode() {
+        return "quic_first".equals(relayPriorityMode());
+    }
+
+    public static boolean quicEnabled() {
+        return QUIC_ENABLED_VALUE.get();
+    }
+
+    public static int quicAttempts() {
+        return QUIC_ATTEMPTS_VALUE.get();
+    }
+
+    public static int quicAttemptIntervalMs() {
+        return QUIC_ATTEMPT_INTERVAL_MS_VALUE.get();
+    }
+
+    public static String quicTlsMode() {
+        String mode = QUIC_TLS_MODE_VALUE.get().trim().toLowerCase();
+        if (mode.equals("ca_or_pinned") || mode.equals("insecure_trust_all")) {
+            return mode;
+        }
+        return "ca_or_pinned";
+    }
+
+    public static String quicCertFingerprintSha256() {
+        return QUIC_CERT_FINGERPRINT_SHA256_VALUE.get().trim();
     }
 }
 
