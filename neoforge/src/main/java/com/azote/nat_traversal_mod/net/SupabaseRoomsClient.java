@@ -165,14 +165,31 @@ public final class SupabaseRoomsClient {
                 ROOM_FRESHNESS_TTL_MILLIS
         );
 
-        Optional<ResolvedTarget> publicEndpointTarget = parsePublicEndpoint(body, roomName);
-        if (publicEndpointTarget.isPresent()) {
-            return publicEndpointTarget;
-        }
+        if (Config.relayFirstMode()) {
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] relay_priority_mode=relay_first. Try relay endpoint before public_endpoint. room_name='{}'.",
+                    roomName
+            );
 
-        Optional<ResolvedTarget> relayEndpointTarget = parseRelayEndpoint(body, roomName);
-        if (relayEndpointTarget.isPresent()) {
-            return relayEndpointTarget;
+            Optional<ResolvedTarget> relayEndpointTarget = parseRelayEndpoint(body, roomName);
+            if (relayEndpointTarget.isPresent()) {
+                return relayEndpointTarget;
+            }
+
+            Optional<ResolvedTarget> publicEndpointTarget = parsePublicEndpoint(body, roomName);
+            if (publicEndpointTarget.isPresent()) {
+                return publicEndpointTarget;
+            }
+        } else {
+            Optional<ResolvedTarget> publicEndpointTarget = parsePublicEndpoint(body, roomName);
+            if (publicEndpointTarget.isPresent()) {
+                return publicEndpointTarget;
+            }
+
+            Optional<ResolvedTarget> relayEndpointTarget = parseRelayEndpoint(body, roomName);
+            if (relayEndpointTarget.isPresent()) {
+                return relayEndpointTarget;
+            }
         }
 
         if (Config.stunEnabled()) {
@@ -220,6 +237,14 @@ public final class SupabaseRoomsClient {
         if (relayEndpoint.isBlank()) {
             Nat_traversal_mod.LOGGER.warn(
                     "[nat-traversal-mod] relay_status=ready but relay_endpoint is empty. room_name='{}'.",
+                    roomName
+            );
+            return Optional.empty();
+        }
+
+        if (!RelayClientConnectorManager.ensureStarted()) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] relay_status=ready but local relay client connector is not running. room_name='{}'.",
                     roomName
             );
             return Optional.empty();

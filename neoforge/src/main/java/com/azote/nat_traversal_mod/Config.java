@@ -53,6 +53,14 @@ public class Config {
             .comment("Relay endpoint used by local connector (host-side reachable host:port)")
             .define("relay_connect_endpoint", "");
 
+    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_SERVER_VALUE = BUILDER
+            .comment("Relay endpoint used by server-side relay connector (host-side reachable host:port)")
+            .define("relay_connect_endpoint_server", "");
+
+    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_CLIENT_VALUE = BUILDER
+            .comment("Relay endpoint used by client-side relay connector (client-side reachable host:port)")
+            .define("relay_connect_endpoint_client", "");
+
     private static final ModConfigSpec.ConfigValue<String> RELAY_TOKEN_VALUE = BUILDER
             .comment("Relay token used by host/client relay connectors")
             .define("relay_token", "");
@@ -68,6 +76,10 @@ public class Config {
     private static final ModConfigSpec.IntValue RELAY_CLIENT_LOCAL_PORT_VALUE = BUILDER
             .comment("Local relay client connector port")
             .defineInRange("relay_client_local_port", 26667, 1, 65535);
+
+    private static final ModConfigSpec.ConfigValue<String> RELAY_PRIORITY_MODE_VALUE = BUILDER
+            .comment("Relay route priority mode: public_first or relay_first")
+            .define("relay_priority_mode", "public_first");
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -124,6 +136,16 @@ public class Config {
         return value.isBlank() ? relayEndpoint() : value;
     }
 
+    public static String relayConnectEndpointForServer() {
+        String value = RELAY_CONNECT_ENDPOINT_SERVER_VALUE.get().trim();
+        return value.isBlank() ? relayConnectEndpoint() : value;
+    }
+
+    public static String relayConnectEndpointForClient() {
+        String value = RELAY_CONNECT_ENDPOINT_CLIENT_VALUE.get().trim();
+        return value.isBlank() ? relayConnectEndpoint() : value;
+    }
+
     public static String relayToken() {
         return RELAY_TOKEN_VALUE.get().trim();
     }
@@ -138,6 +160,18 @@ public class Config {
 
     public static int relayClientLocalPort() {
         return RELAY_CLIENT_LOCAL_PORT_VALUE.get();
+    }
+
+    public static String relayPriorityMode() {
+        String mode = RELAY_PRIORITY_MODE_VALUE.get().trim().toLowerCase();
+        if (mode.equals("relay_first") || mode.equals("public_first")) {
+            return mode;
+        }
+        return "public_first";
+    }
+
+    public static boolean relayFirstMode() {
+        return "relay_first".equals(relayPriorityMode());
     }
 }
 

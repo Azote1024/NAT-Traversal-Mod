@@ -82,10 +82,13 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - `relay_endpoint` (自前relayの接続先 host:port)
 - `relay_publish_endpoint` (roomsへ公開するrelay接続先 host:port)
 - `relay_connect_endpoint` (ローカルconnectorが実際に接続するrelay接続先 host:port)
+- `relay_connect_endpoint_server` (サーバー側connector用 relay接続先 host:port)
+- `relay_connect_endpoint_client` (クライアント側connector用 relay接続先 host:port)
 - `relay_token` (relay接続用トークン)
 - `relay_status` (`ready` or `down`)
 - `relay_client_connector_enabled` (ローカルrelayクライアント利用ON/OFF)
 - `relay_client_local_port` (ローカルrelayクライアント待受ポート)
+- `relay_priority_mode` (`public_first` / `relay_first`)
 
 `publish_host_ip` はホスト側で必須です（公開IPまたは到達可能IP）。
 
@@ -96,6 +99,11 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 ローカルrelayクライアントの起動が前提です（未起動時は接続失敗になります）。
 
 `relay_publish_endpoint` と `relay_connect_endpoint` は未設定時に `relay_endpoint` を使います。
+`relay_connect_endpoint_server` は未設定時に `relay_connect_endpoint` を使います。
+`relay_connect_endpoint_client` は未設定時に `relay_connect_endpoint` を使います。
+
+`relay_priority_mode` は既定で `public_first` です。`relay_first` にすると
+`relay_status=ready` 時に relay経路を `public_endpoint` より先に試します。
 
 ## 動作確認手順 (最短)
 

@@ -103,7 +103,7 @@ public final class RelayHostConnector {
             return null;
         }
 
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpoint(), "relay_connect_endpoint");
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpointForServer(), "relay_connect_endpoint_server");
         return endpoint.map(value -> new RelaySessionConfig(value, token)).orElse(null);
     }
 

@@ -32,7 +32,7 @@ public final class RelayClientConnectorManager {
             return false;
         }
 
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpoint(), "relay_connect_endpoint");
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpointForClient(), "relay_connect_endpoint_client");
         if (endpoint.isEmpty()) {
             return false;
         }
@@ -62,7 +62,7 @@ public final class RelayClientConnectorManager {
     }
 
     private static void handleLocalConnection(Socket localSocket) {
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpoint(), "relay_connect_endpoint");
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpointForClient(), "relay_connect_endpoint_client");
         String token = Config.relayToken();
         if (endpoint.isEmpty() || token.isBlank()) {
             RelayIoBridge.closeQuietly(localSocket);
