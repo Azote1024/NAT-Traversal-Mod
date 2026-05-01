@@ -1,9 +1,9 @@
-# roomsデータ契約 (STUN前準備)
+# roomsデータ契約 (STUN/relay運用)
 
 ## 1. 目的
 
 - 現行MVPの `rooms` 利用仕様を固定し、実装と運用のブレを防ぐ。
-- 将来のSTUN拡張キーを「未実装・後方互換あり」で先に定義する。
+- STUN/relay拡張キーの実装状態を現状コードと一致させる。
 
 ## 2. 現行で必須のキー (実装済み)
 
@@ -24,7 +24,7 @@
 6. それ以外は `host_ip:host_port` を接続先として採用
 7. どこかで失敗したら元接続へフォールバック
 
-## 4. 将来STUN拡張キー (未実装・任意)
+## 4. STUN/relay拡張キー (実装済み・任意)
 
 - `nat_method: text`
   - 例: `direct`, `stun`
@@ -39,10 +39,15 @@
 - `relay_status: text`
   - 例: `ready`, `down`
 
-現時点の実装では上記キーを参照しない。存在しなくても正常動作すること。
+現行実装では、`stun_enabled=true` のとき `public_endpoint` をpublishし、
+`relay_endpoint` / `relay_token` / `relay_status` もホストpublishに含める。
 
-現時点の最小STUN実装では、`stun_enabled=true` のときホスト側publishで上記キーを書き込む。
-クライアント側解決はまだ既存の `host_ip:host_port` 優先のまま維持する。
+クライアント解決順:
+
+- `relay_priority_mode=public_first` (既定): `public_endpoint` -> relay -> `host_ip:host_port`
+- `relay_priority_mode=relay_first`: relay -> `public_endpoint` -> `host_ip:host_port`
+
+どの経路でも不正データ/不達時はフォールバックで継続する。
 
 カラム追加migration:
 
@@ -58,6 +63,7 @@
 ## 6. ログ方針
 
 - `info`: `Intercept hit`, `Room data is fresh`, `Resolved room target`
+- `info`: `Use public_endpoint from room`, `Use local relay client connector`, `Relay host connector paired`
 - `warn`: `Room data is stale`, `Room resolve failed`, `Fallback to original target`
 - 失敗時は必ずフォールバックを明示する。
 

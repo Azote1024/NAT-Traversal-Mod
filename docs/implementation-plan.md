@@ -7,7 +7,7 @@
 
 ## 2. 設計方針
 
-- 最小構成を優先し、処理は `Config` / `Resolver Mixin` / `Supabase Client` / `Server Publisher` に限定。
+- 最小構成を優先し、処理は `Config(common/server/client)` / `Resolver Mixin` / `Supabase Client` / `Server Publisher` / `Relay Connector` に限定。
 - Supabase はシグナリング用途のみ。Minecraft 通信本体は既存経路を利用。
 - 失敗時は接続中断せずフォールバックを優先。
 
@@ -72,16 +72,17 @@
 5. M5: 友人向け運用固定化（次）
    - 標準運用モードの一本化
    - 判定ラベル運用の固定
-6. M6: シンプル中継サーバーソフト構築（予定）
+6. M6: シンプル中継サーバーソフト構築（進行中）
    - `relay-server/` ワークスペース追加
    - relay経路導入（後方互換維持）
+   - server/client 分離設定で運用
 
 ### M6 実装優先度（動くもの優先）
 
 - MUST
-  1. relay情報の publish 連携（`relay_endpoint` / `relay_token` / `relay_status`）
-  2. relay経路のE2E接続確認（`relay_status=ready`）
-  3. READMEの最小運用手順更新
+  1. relay情報の publish 連携（`relay_endpoint` / `relay_token` / `relay_status`）(完了)
+  2. relay経路のE2E接続確認（`relay_status=ready`）(完了)
+  3. READMEの最小運用手順更新（進行中）
 - TODO（後回し）
   1. `relay_token` TTL失効とセッション掃除
   2. relay運用ログの整形・ローテーション
@@ -90,14 +91,18 @@
 ## 6. 実装マップ
 
 - `neoforge/src/main/java/com/azote/nat_traversal_mod/Config.java`
-  - Configキー定義
+  - `COMMON` / `SERVER` / `CLIENT` キー定義
 - `neoforge/src/main/java/com/azote/nat_traversal_mod/mixin/ServerNameResolverMixin.java`
   - `ServerNameResolver#resolveAddress` に注入、クライアント通知
 - `neoforge/src/main/java/com/azote/nat_traversal_mod/net/SupabaseRoomsClient.java`
   - Supabase REST問い合わせ、最小JSON解析
 - `neoforge/src/main/java/com/azote/nat_traversal_mod/net/SupabaseRoomsPublisher.java`
   - サーバー起動時/定期 publish、停止時 close
-  - STUN拡張用payload差し込みポイント（現状は送信項目不変）
+  - STUN/relay拡張項目のpublish
+- `neoforge/src/main/java/com/azote/nat_traversal_mod/net/RelayHostConnector.java`
+  - サーバー側 relay 接続（host role）
+- `neoforge/src/main/java/com/azote/nat_traversal_mod/net/RelayClientConnectorManager.java`
+  - クライアント側 local relay connector
 - `neoforge/src/main/resources/nat_traversal_mod.mixins.json`
   - client mixin 登録
 
@@ -117,10 +122,11 @@
 
 ## 8. 最小切り分け手順
 
-1. `run/config/nat_traversal_mod-common.toml` の主要キー確認
-2. `publish_host_ip` がホスト側で設定されているか確認
-3. ホストログで `Room published` / `Room closed` の出力有無を確認
-4. 参加側ログで `Intercept hit` と `Resolved room target` を確認
+1. `run/config/nat_traversal_mod-common.toml` の共通キー（`room_name` / `relay_token`）確認
+2. `run/config/nat_traversal_mod-server.toml` の host/relayキー確認
+3. `run/config/nat_traversal_mod-client.toml` の client/relayキー確認
+4. ホストログで `Room published` / `Relay host connector paired` を確認
+5. 参加側ログで `Use local relay client connector` / `Resolved room target` を確認
 
 ## 9. 次フェーズ (推奨順)
 

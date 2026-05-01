@@ -88,9 +88,6 @@ public final class RelayHostConnector {
     }
 
     private RelaySessionConfig loadConfig() {
-        if (!Config.relayClientConnectorEnabled()) {
-            return null;
-        }
 
         String status = Config.relayStatus();
         if (!"ready".equalsIgnoreCase(status)) {

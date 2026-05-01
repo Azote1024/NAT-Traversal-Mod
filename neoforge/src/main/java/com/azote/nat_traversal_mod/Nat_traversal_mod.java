@@ -1,6 +1,7 @@
 package com.azote.nat_traversal_mod;
 
 import com.azote.nat_traversal_mod.net.SupabaseRoomsPublisher;
+import com.azote.nat_traversal_mod.net.RelayHostConnector;
 import com.mojang.logging.LogUtils;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -24,12 +25,15 @@ public class Nat_traversal_mod {
 
     private static final long PUBLISH_INTERVAL_SECONDS = 60L;
     private ScheduledExecutorService roomPublisherScheduler;
+    private final RelayHostConnector relayHostConnector = new RelayHostConnector();
 
     // The constructor for the mod class is the first code that is run when your mod is loaded.
     // FML will recognize some parameter types like IEventBus or ModContainer and pass them in automatically.
     public Nat_traversal_mod(ModContainer modContainer) {
-        // Register our mod's ModConfigSpec so that FML can create and load the config file for us
-        modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        // Register split specs so side-specific keys are separated into common/server/client config files.
+        modContainer.registerConfig(ModConfig.Type.COMMON, Config.COMMON_SPEC);
+        modContainer.registerConfig(ModConfig.Type.SERVER, Config.SERVER_SPEC);
+        modContainer.registerConfig(ModConfig.Type.CLIENT, Config.CLIENT_SPEC);
         NeoForge.EVENT_BUS.addListener(this::onServerStarted);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
 
@@ -41,11 +45,13 @@ public class Nat_traversal_mod {
         LOGGER.info("[nat-traversal-mod] Server started on port {}. Publish room now and every {}s.", serverPort, PUBLISH_INTERVAL_SECONDS);
 
         SupabaseRoomsPublisher.publishOpenRoom(serverPort);
+        relayHostConnector.start(serverPort);
         startPeriodicPublish(serverPort);
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
         stopPeriodicPublish();
+        relayHostConnector.stop();
         SupabaseRoomsPublisher.closeRoomAsync();
     }
 

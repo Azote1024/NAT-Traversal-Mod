@@ -153,8 +153,16 @@ public final class SupabaseRoomsPublisher {
                 "\"host_port\":" + hostPort + "," +
                 "\"status\":\"open\"," +
                 "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
+                appendRelayFieldsForOpenRoom(config) +
                 appendFutureNatFieldsForOpenRoom(config, hostPort) +
                 "}";
+    }
+
+    private static String appendRelayFieldsForOpenRoom(PublishConfig config) {
+        return ","
+                + "\"relay_endpoint\":\"" + jsonEscape(config.relayEndpoint) + "\"," 
+                + "\"relay_token\":\"" + jsonEscape(config.relayToken) + "\"," 
+                + "\"relay_status\":\"" + jsonEscape(config.relayStatus) + "\"";
     }
 
     private static String appendFutureNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
@@ -195,6 +203,9 @@ public final class SupabaseRoomsPublisher {
         String roomName = Config.roomName();
         String hostName = Config.publishHostName();
         String hostIp = Config.publishHostIp();
+        String relayEndpoint = Config.relayPublishEndpoint();
+        String relayToken = Config.relayToken();
+        String relayStatus = Config.relayStatus();
 
         if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
             Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Skip room publish: supabase config is incomplete.");
@@ -206,7 +217,7 @@ public final class SupabaseRoomsPublisher {
             return null;
         }
 
-        return new PublishConfig(supabaseUrl, supabaseKey, roomName, hostName, hostIp);
+        return new PublishConfig(supabaseUrl, supabaseKey, roomName, hostName, hostIp, relayEndpoint, relayToken, relayStatus);
     }
 
     private static String jsonEscape(String value) {
@@ -224,7 +235,16 @@ public final class SupabaseRoomsPublisher {
         return singleLine.substring(0, 200) + "...";
     }
 
-    private record PublishConfig(String supabaseUrl, String supabaseKey, String roomName, String hostName, String hostIp) {
+    private record PublishConfig(
+            String supabaseUrl,
+            String supabaseKey,
+            String roomName,
+            String hostName,
+            String hostIp,
+            String relayEndpoint,
+            String relayToken,
+            String relayStatus
+    ) {
     }
 
     private record RequestResult(boolean success, int statusCode, String body) {

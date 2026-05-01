@@ -27,14 +27,14 @@
 
 ## 5. 事前準備チェック
 
-1. Hostの `nat_traversal_mod-common.toml`
-   - `room_name` を固定
-   - `publish_host_ip` は外部から到達可能なIPまたはDDNS
-2. Clientの `nat_traversal_mod-common.toml`
-   - 同じ `room_name`
-   - `intercept_host=play.mc.local`
-   - relay利用時は `relay_client_connector_enabled=true`
-   - relay利用時はローカルrelayクライアントを起動
+1. Hostの設定ファイル
+   - `nat_traversal_mod-common.toml`: `room_name` / `relay_token` を設定
+   - `nat_traversal_mod-server.toml`: `publish_host_ip` / `relay_publish_endpoint` / `relay_connect_endpoint_server` / `relay_status=ready`
+2. Clientの設定ファイル
+   - `nat_traversal_mod-common.toml`: Hostと同じ `room_name` / `relay_token`
+   - `nat_traversal_mod-client.toml`: `intercept_host=play.mc.local` / `relay_client_connector_enabled=true`
+   - relay優先試験時は `relay_priority_mode=relay_first`
+   - `relay_connect_endpoint_client` はクライアント側から到達可能な公開endpointを使用
 3. Supabase `rooms` 行が作成されること（`Room published` ログ）
 4. Minecraftサーバーの実ポート設定確認（デフォルト 25565）
 
@@ -106,4 +106,16 @@
   - 今後は relay/TURN 相当の中継設計を別フェーズで検討
 - LAN外試験で成功する場合:
   - 現設計を維持し、運用改善（通知、再試行、キャッシュ）を進める
+
+## 10. 実績メモ（2026-05-01）
+
+- `SUCCESS_RELAY_ENDPOINT` を確認
+- 条件: 別PCクライアント + テザリング（サーバー/relayと別IP）
+- 代表ログ:
+  - server: `Relay host connector paired`
+  - client: `Use local relay client connector`
+
+注記:
+
+- token/IP/DDNS 等の機微情報は docs に直書きせず、`run/config` のみで管理する
 

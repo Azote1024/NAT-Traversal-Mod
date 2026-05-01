@@ -3,85 +3,89 @@ package com.azote.nat_traversal_mod;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public class Config {
-    private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
+    private static final ModConfigSpec.Builder COMMON_BUILDER = new ModConfigSpec.Builder();
+    private static final ModConfigSpec.Builder SERVER_BUILDER = new ModConfigSpec.Builder();
+    private static final ModConfigSpec.Builder CLIENT_BUILDER = new ModConfigSpec.Builder();
 
-    private static final ModConfigSpec.ConfigValue<String> SUPABASE_URL_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> SUPABASE_URL_VALUE = COMMON_BUILDER
             .comment("Supabase project URL. Example: https://xxxx.supabase.co")
             .define("supabase_url", """");
 
-    private static final ModConfigSpec.ConfigValue<String> SUPABASE_KEY_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> SUPABASE_KEY_VALUE = COMMON_BUILDER
             .comment("Supabase publishable key used for REST requests")
             .define("supabase_key", """");
 
-    private static final ModConfigSpec.ConfigValue<String> ROOM_NAME_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> ROOM_NAME_VALUE = COMMON_BUILDER
             .comment("Fixed room_name key in public.rooms")
             .define("room_name", "default_room");
 
-    private static final ModConfigSpec.ConfigValue<String> INTERCEPT_HOST_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> INTERCEPT_HOST_VALUE = CLIENT_BUILDER
             .comment("Only this exact host is intercepted")
             .define("intercept_host", "play.mc.local");
 
-    private static final ModConfigSpec.ConfigValue<String> PUBLISH_HOST_NAME_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> PUBLISH_HOST_NAME_VALUE = SERVER_BUILDER
             .comment("Server-side publish host_name")
             .define("publish_host_name", "host");
 
-    private static final ModConfigSpec.ConfigValue<String> PUBLISH_HOST_IP_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> PUBLISH_HOST_IP_VALUE = SERVER_BUILDER
             .comment("Server-side publish host_ip (public IP or DDNS target)")
             .define("publish_host_ip", "");
 
-    private static final ModConfigSpec.BooleanValue STUN_ENABLED_VALUE = BUILDER
+    private static final ModConfigSpec.BooleanValue STUN_ENABLED_VALUE = COMMON_BUILDER
             .comment("Enable STUN flow (reserved for future implementation)")
             .define("stun_enabled", false);
 
-    private static final ModConfigSpec.ConfigValue<String> STUN_SERVER_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> STUN_SERVER_VALUE = COMMON_BUILDER
             .comment("Primary STUN server host:port (reserved for future implementation)")
             .define("stun_server", "stun.l.google.com:19302");
 
-    private static final ModConfigSpec.IntValue STUN_TIMEOUT_MS_VALUE = BUILDER
+    private static final ModConfigSpec.IntValue STUN_TIMEOUT_MS_VALUE = COMMON_BUILDER
             .comment("STUN timeout in milliseconds (reserved for future implementation)")
             .defineInRange("stun_timeout_ms", 3000, 500, 10000);
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_ENDPOINT_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_ENDPOINT_VALUE = COMMON_BUILDER
             .comment("Relay endpoint host:port (for self-hosted relay server)")
             .define("relay_endpoint", "");
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_PUBLISH_ENDPOINT_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_PUBLISH_ENDPOINT_VALUE = SERVER_BUILDER
             .comment("Relay endpoint written to rooms (publicly reachable host:port)")
             .define("relay_publish_endpoint", "");
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_VALUE = BUILDER
-            .comment("Relay endpoint used by local connector (host-side reachable host:port)")
+    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_VALUE = COMMON_BUILDER
+            .comment("Legacy relay endpoint used when side-specific endpoint is empty")
             .define("relay_connect_endpoint", "");
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_SERVER_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_SERVER_VALUE = SERVER_BUILDER
             .comment("Relay endpoint used by server-side relay connector (host-side reachable host:port)")
             .define("relay_connect_endpoint_server", "");
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_CLIENT_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_CLIENT_VALUE = CLIENT_BUILDER
             .comment("Relay endpoint used by client-side relay connector (client-side reachable host:port)")
             .define("relay_connect_endpoint_client", "");
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_TOKEN_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_TOKEN_VALUE = COMMON_BUILDER
             .comment("Relay token used by host/client relay connectors")
             .define("relay_token", "");
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_STATUS_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_STATUS_VALUE = SERVER_BUILDER
             .comment("Relay status: ready or down")
             .define("relay_status", "down");
 
-    private static final ModConfigSpec.BooleanValue RELAY_CLIENT_CONNECTOR_ENABLED_VALUE = BUILDER
+    private static final ModConfigSpec.BooleanValue RELAY_CLIENT_CONNECTOR_ENABLED_VALUE = CLIENT_BUILDER
             .comment("Enable local relay client connector path")
             .define("relay_client_connector_enabled", false);
 
-    private static final ModConfigSpec.IntValue RELAY_CLIENT_LOCAL_PORT_VALUE = BUILDER
+    private static final ModConfigSpec.IntValue RELAY_CLIENT_LOCAL_PORT_VALUE = CLIENT_BUILDER
             .comment("Local relay client connector port")
             .defineInRange("relay_client_local_port", 26667, 1, 65535);
 
-    private static final ModConfigSpec.ConfigValue<String> RELAY_PRIORITY_MODE_VALUE = BUILDER
+    private static final ModConfigSpec.ConfigValue<String> RELAY_PRIORITY_MODE_VALUE = CLIENT_BUILDER
             .comment("Relay route priority mode: public_first or relay_first")
             .define("relay_priority_mode", "public_first");
 
-    static final ModConfigSpec SPEC = BUILDER.build();
+    static final ModConfigSpec COMMON_SPEC = COMMON_BUILDER.build();
+    static final ModConfigSpec SERVER_SPEC = SERVER_BUILDER.build();
+    static final ModConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
 
     private Config() {
     }

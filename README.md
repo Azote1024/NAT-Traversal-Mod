@@ -64,28 +64,35 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 
 ## 設定ファイル
 
-`runClient` または `runServer` 実行後に以下へ生成されます。
+`runClient` / `runServer` 実行後、設定は役割ごとに分離されます。
 
-- `neoforge/run/config/nat_traversal_mod-common.toml`
+- `nat_traversal_mod-common.toml` (共通)
+- `nat_traversal_mod-client.toml` (クライアント用)
+- `nat_traversal_mod-server.toml` (サーバー用)
 
 主な設定:
 
+共通 (`nat_traversal_mod-common.toml`)
 - `supabase_url`
 - `supabase_key`
 - `room_name`
-- `intercept_host`
-- `publish_host_name`
-- `publish_host_ip`
 - `stun_enabled` (STUN拡張を有効化)
 - `stun_server` (STUNサーバー)
 - `stun_timeout_ms` (STUNタイムアウト)
 - `relay_endpoint` (自前relayの接続先 host:port)
-- `relay_publish_endpoint` (roomsへ公開するrelay接続先 host:port)
-- `relay_connect_endpoint` (ローカルconnectorが実際に接続するrelay接続先 host:port)
-- `relay_connect_endpoint_server` (サーバー側connector用 relay接続先 host:port)
-- `relay_connect_endpoint_client` (クライアント側connector用 relay接続先 host:port)
+- `relay_connect_endpoint` (互換用の旧relay接続先)
 - `relay_token` (relay接続用トークン)
+
+サーバー (`nat_traversal_mod-server.toml`)
+- `publish_host_name`
+- `publish_host_ip`
+- `relay_publish_endpoint` (roomsへ公開するrelay接続先 host:port)
+- `relay_connect_endpoint_server` (サーバー側connector用 relay接続先)
 - `relay_status` (`ready` or `down`)
+
+クライアント (`nat_traversal_mod-client.toml`)
+- `intercept_host`
+- `relay_connect_endpoint_client` (クライアント側connector用 relay接続先)
 - `relay_client_connector_enabled` (ローカルrelayクライアント利用ON/OFF)
 - `relay_client_local_port` (ローカルrelayクライアント待受ポート)
 - `relay_priority_mode` (`public_first` / `relay_first`)
@@ -98,12 +105,16 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 `relay_*` を使う場合は、`relay_client_connector_enabled=true` と
 ローカルrelayクライアントの起動が前提です（未起動時は接続失敗になります）。
 
-`relay_publish_endpoint` と `relay_connect_endpoint` は未設定時に `relay_endpoint` を使います。
+`relay_publish_endpoint` は未設定時に `relay_endpoint` を使います。
 `relay_connect_endpoint_server` は未設定時に `relay_connect_endpoint` を使います。
 `relay_connect_endpoint_client` は未設定時に `relay_connect_endpoint` を使います。
 
 `relay_priority_mode` は既定で `public_first` です。`relay_first` にすると
 `relay_status=ready` 時に relay経路を `public_endpoint` より先に試します。
+
+運用ルール:
+
+- token/IP/DDNS などの機微値は `run/config` でのみ管理し、docs にはプレースホルダで記載する。
 
 ## 動作確認手順 (最短)
 

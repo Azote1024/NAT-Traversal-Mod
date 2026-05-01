@@ -74,7 +74,7 @@
   - 友人向けセットアップ手順だけで再現可能
   - 失敗時に判定ラベルへ即分類できる
 
-### M6: シンプル中継サーバーソフト構築（予定）
+### M6: シンプル中継サーバーソフト構築（進行中）
 
 - 目的:
   - 到達可能な場所に置く自前中継で、ポート開放不可環境の成功率を上げる。
@@ -94,12 +94,21 @@
 - `relay-server/start.py` + `relay_config.toml` 実装済み
 - `relay-server/test_relay.py` スモークテスト成功
 - Ubuntu relayサーバーのUFW調整後、`Test-NetConnection <relay_connect_endpoint>:40000` 成功
+- `Config` を `COMMON` / `SERVER` / `CLIENT` の3ファイル運用へ分離済み
+- サーバー側 `Relay host connector paired` を確認済み
+- 別端末クライアント（テザリング・別IP）で relay経路参加成功（`SUCCESS_RELAY_ENDPOINT`）
 
 直近のMUST:
 
-1. `SupabaseRoomsPublisher` で `relay_endpoint` / `relay_token` / `relay_status` を publish
-2. `SupabaseRoomsClient` の relay経路をE2Eで検証
-3. READMEに relay利用の最小手順を追加
+1. `SupabaseRoomsPublisher` で `relay_endpoint` / `relay_token` / `relay_status` を publish（完了）
+2. `SupabaseRoomsClient` の relay経路をE2Eで検証（完了）
+3. READMEに relay利用の最小手順を追加（進行中）
+
+現時点の残タスク（M6完了条件に向けた整理）:
+
+1. relay運用手順を `common/client/server` 分離前提で docs 全体へ反映
+2. `relay_priority_mode`（`public_first` / `relay_first`）の使い分け基準を固定
+3. 判定ラベル運用結果を継続記録（再現性の蓄積）
 
 後回しTODO:
 
@@ -115,6 +124,8 @@
   - 対策: `docs/lan-outside-test-plan.md` の判定ログで切り分け
 - 設定ミス:
   - 対策: `publish_host_ip` 未設定時は warn とフォールバックを維持
+- 機微情報の混入:
+  - 対策: token/IP は `run/config` のみに保持し、docs にはプレースホルダを使う
 
 ## 4. テストゲート
 
