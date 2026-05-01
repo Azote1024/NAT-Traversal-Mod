@@ -21,6 +21,7 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - 取得条件: `room_name` 完全一致 + `status=open`
 - 鮮度条件: `updated_at` が 180 秒以内
 - `public_endpoint` が有効なら優先採用、なければ `host_ip:host_port`
+- `relay_status=ready` かつ relayクライアント有効時は relay経路を次点で採用
 - `intercept_host` 比較: 完全一致のみ
 - ホスト側更新:
   - サーバー起動時 publish
@@ -79,13 +80,22 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - `stun_server` (STUNサーバー)
 - `stun_timeout_ms` (STUNタイムアウト)
 - `relay_endpoint` (自前relayの接続先 host:port)
+- `relay_publish_endpoint` (roomsへ公開するrelay接続先 host:port)
+- `relay_connect_endpoint` (ローカルconnectorが実際に接続するrelay接続先 host:port)
 - `relay_token` (relay接続用トークン)
 - `relay_status` (`ready` or `down`)
+- `relay_client_connector_enabled` (ローカルrelayクライアント利用ON/OFF)
+- `relay_client_local_port` (ローカルrelayクライアント待受ポート)
 
 `publish_host_ip` はホスト側で必須です（公開IPまたは到達可能IP）。
 
 `stun_*` は最小STUN実装を含みますが、`stun_enabled=true` で使う場合は
 `supabase/migrations/20260501061000_add_stun_candidate_columns.sql` の適用が前提です。
+
+`relay_*` を使う場合は、`relay_client_connector_enabled=true` と
+ローカルrelayクライアントの起動が前提です（未起動時は接続失敗になります）。
+
+`relay_publish_endpoint` と `relay_connect_endpoint` は未設定時に `relay_endpoint` を使います。
 
 ## 動作確認手順 (最短)
 
@@ -101,6 +111,7 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 - `Intercept hit` が出る -> 参加側で横取り発火
 - `Resolved room target` が出る -> 差し替え成功
 - `Room data is stale` が出る -> ルーム情報が古いためフォールバック
+- `Use local relay client connector` が出る -> relay経路採用
 - `Fallback to original target` が出る -> 取得失敗だが通常接続継続
 
 ## ビルド
@@ -121,3 +132,4 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot"
 6. 友人向け運用手順の固定
 7. シンプル中継サーバーソフト構築（`relay-server/`）
 8. UDP hole punching + QUICブリッジを別ブランチで実験
+

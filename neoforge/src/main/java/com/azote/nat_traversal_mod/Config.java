@@ -45,6 +45,14 @@ public class Config {
             .comment("Relay endpoint host:port (for self-hosted relay server)")
             .define("relay_endpoint", "");
 
+    private static final ModConfigSpec.ConfigValue<String> RELAY_PUBLISH_ENDPOINT_VALUE = BUILDER
+            .comment("Relay endpoint written to rooms (publicly reachable host:port)")
+            .define("relay_publish_endpoint", "");
+
+    private static final ModConfigSpec.ConfigValue<String> RELAY_CONNECT_ENDPOINT_VALUE = BUILDER
+            .comment("Relay endpoint used by local connector (host-side reachable host:port)")
+            .define("relay_connect_endpoint", "");
+
     private static final ModConfigSpec.ConfigValue<String> RELAY_TOKEN_VALUE = BUILDER
             .comment("Relay token used by host/client relay connectors")
             .define("relay_token", "");
@@ -52,6 +60,14 @@ public class Config {
     private static final ModConfigSpec.ConfigValue<String> RELAY_STATUS_VALUE = BUILDER
             .comment("Relay status: ready or down")
             .define("relay_status", "down");
+
+    private static final ModConfigSpec.BooleanValue RELAY_CLIENT_CONNECTOR_ENABLED_VALUE = BUILDER
+            .comment("Enable local relay client connector path")
+            .define("relay_client_connector_enabled", false);
+
+    private static final ModConfigSpec.IntValue RELAY_CLIENT_LOCAL_PORT_VALUE = BUILDER
+            .comment("Local relay client connector port")
+            .defineInRange("relay_client_local_port", 26667, 1, 65535);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -98,6 +114,16 @@ public class Config {
         return RELAY_ENDPOINT_VALUE.get().trim();
     }
 
+    public static String relayPublishEndpoint() {
+        String value = RELAY_PUBLISH_ENDPOINT_VALUE.get().trim();
+        return value.isBlank() ? relayEndpoint() : value;
+    }
+
+    public static String relayConnectEndpoint() {
+        String value = RELAY_CONNECT_ENDPOINT_VALUE.get().trim();
+        return value.isBlank() ? relayEndpoint() : value;
+    }
+
     public static String relayToken() {
         return RELAY_TOKEN_VALUE.get().trim();
     }
@@ -105,4 +131,13 @@ public class Config {
     public static String relayStatus() {
         return RELAY_STATUS_VALUE.get().trim();
     }
+
+    public static boolean relayClientConnectorEnabled() {
+        return RELAY_CLIENT_CONNECTOR_ENABLED_VALUE.get();
+    }
+
+    public static int relayClientLocalPort() {
+        return RELAY_CLIENT_LOCAL_PORT_VALUE.get();
+    }
 }
+

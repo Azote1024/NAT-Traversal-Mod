@@ -58,3 +58,12 @@ Set-Location "C:\Users\nitro\Documents\GitHub\NAT-Traversal-Mod\relay-server"
 uv run python .\test_relay.py
 ```
 
+## Ubuntu Notes (firewall)
+
+- If relay server runs on Ubuntu with UFW, allow relay port explicitly.
+
+```bash
+sudo ufw allow 40000/tcp
+sudo ufw status
+```
+

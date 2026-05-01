@@ -186,6 +186,10 @@ public final class SupabaseRoomsClient {
     }
 
     private static Optional<ResolvedTarget> parseRelayEndpoint(String body, String roomName) {
+        if (!Config.relayClientConnectorEnabled()) {
+            return Optional.empty();
+        }
+
         Matcher relayStatusMatcher = RELAY_STATUS_PATTERN.matcher(body);
         if (!relayStatusMatcher.find()) {
             return Optional.empty();
@@ -213,16 +217,22 @@ public final class SupabaseRoomsClient {
         }
 
         String relayEndpoint = relayEndpointMatcher.group(1).trim();
-        Optional<ResolvedTarget> parsed = parseEndpoint(relayEndpoint, roomName, "relay_endpoint");
-        if (parsed.isPresent()) {
-            Nat_traversal_mod.LOGGER.info(
-                    "[nat-traversal-mod] Use relay_endpoint from room. room_name='{}', target='{}:{}'",
-                    roomName,
-                    parsed.get().hostIp(),
-                    parsed.get().hostPort()
+        if (relayEndpoint.isBlank()) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] relay_status=ready but relay_endpoint is empty. room_name='{}'.",
+                    roomName
             );
+            return Optional.empty();
         }
-        return parsed;
+
+        int localRelayPort = Config.relayClientLocalPort();
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] Use local relay client connector. room_name='{}', relay_endpoint='{}', target='127.0.0.1:{}'",
+                roomName,
+                relayEndpoint,
+                localRelayPort
+        );
+        return Optional.of(new ResolvedTarget("127.0.0.1", localRelayPort));
     }
 
     private static Optional<ResolvedTarget> parsePublicEndpoint(String body, String roomName) {
@@ -321,3 +331,4 @@ public final class SupabaseRoomsClient {
     }
 
 }
+
