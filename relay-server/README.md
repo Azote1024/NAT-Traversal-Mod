@@ -38,7 +38,7 @@ When both roles with same token are connected, server starts bidirectional byte 
 - Default config file: `relay_config.toml`
 - Minimal keys:
   - `host`
-  - `port` (default/example is `40000`, configurable)
+  - `port` (default: `40000`, configurable)
   - `handshake_timeout`
 
 ## Run (uv)
@@ -69,7 +69,7 @@ uv run python .\test_relay.py
 ## Ubuntu Notes (firewall)
 
 - If relay server runs on Ubuntu with UFW, allow relay port explicitly.
-- Replace `<relay-port>` with your configured port value (`40000` is the default example).
+- Replace `<relay-port>` with your configured port value (`40000` is the default).
 
 ```bash
 sudo ufw allow <relay-port>/tcp

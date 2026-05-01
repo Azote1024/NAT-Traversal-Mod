@@ -1,4 +1,4 @@
-# NAT Traversal Mod (MVP)
+# NAT Traversal Mod v1.0.0
 
 English source-of-truth tutorial for administrators running this stack.
 
@@ -23,13 +23,13 @@ Japanese guide follows this document: `README.ja.md`.
 
 ## Quickstart (Admin)
 
-1. Apply Supabase migrations in `supabase/migrations/*.sql`.
+1. Apply `supabase/migrations/20260430165635_remote_schema.sql`.
 2. Start relay server.
 3. Configure `neoforge/run/config/*.toml` (common/server/client).
 4. Start Minecraft server (`runServer`) and client (`runClient`).
 5. Verify relay-path logs.
 
-### PowerShell example
+### PowerShell
 
 ```powershell
 Set-Location "<repo-root>"
@@ -60,7 +60,7 @@ Generated under `neoforge/run/config/`:
 Key notes:
 
 - `relay_priority_mode` supports `public_first` (default) and `relay_first`.
-- Relay port values shown in docs are examples; they are configurable.
+- Relay port values are configurable.
 
 ## Verification Markers
 

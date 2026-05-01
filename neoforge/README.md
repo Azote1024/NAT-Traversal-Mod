@@ -44,5 +44,5 @@ Set-Location ".\neoforge"
 
 ## Notes
 
-- Relay port values in docs are examples and configurable.
+- Relay port values are configurable.
 

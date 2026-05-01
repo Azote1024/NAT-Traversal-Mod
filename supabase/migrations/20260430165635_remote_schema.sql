@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS "public"."rooms" (
     "host_name" "text" NOT NULL,
     "host_ip" "text" NOT NULL,
     "host_port" integer NOT NULL,
+    "nat_method" "text",
+    "public_endpoint" "text",
+    "candidates" jsonb,
+    "relay_endpoint" "text",
+    "relay_token" "text",
+    "relay_status" "text",
     "status" "text" DEFAULT 'open'::"text" NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );

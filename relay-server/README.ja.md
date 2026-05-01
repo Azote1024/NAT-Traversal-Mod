@@ -25,7 +25,7 @@
 `relay_config.toml` の主要キー:
 
 - `host`
-- `port`（既定/例: `40000`。設定で変更可能）
+- `port`（既定: `40000`。設定で変更可能）
 - `handshake_timeout`
 
 ## 起動（uv）
@@ -46,7 +46,7 @@ uv run python .\test_relay.py
 
 ## Ubuntu運用メモ（UFW）
 
-`<relay-port>` を設定値に置き換えて許可してください（`40000` は既定例）。
+`<relay-port>` を設定値に置き換えて許可してください（`40000` は既定値）。
 
 ```bash
 sudo ufw allow <relay-port>/tcp

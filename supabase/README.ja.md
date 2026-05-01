@@ -11,18 +11,16 @@ Supabase はシグナリング情報（`public.rooms`）の保存にのみ使用
 
 - host/client の待ち合わせ情報を保存
 - Minecraft本体通信とシグナリングを分離
-- STUN/relay拡張を後方互換で運用
+- STUN/relay列を含むv1.0.0単一スキーマを運用
 
 ## migration
 
-- `migrations/20260430165635_remote_schema.sql`
-- `migrations/20260501061000_add_stun_candidate_columns.sql`
-- `migrations/20260501100000_add_relay_columns.sql`
+- `migrations/20260430165635_remote_schema.sql`（v1.0.0基準スキーマ）
 
 ## Option A: クラウドSupabase
 
 1. Supabaseプロジェクト作成/選択
-2. migration SQL を順番に適用
+2. `migrations/20260430165635_remote_schema.sql` を適用
 3. `public.rooms` の必要列を確認
 4. URL/key は `neoforge/run/config/nat_traversal_mod-common.toml` にローカル設定
 

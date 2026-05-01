@@ -154,7 +154,7 @@ public final class SupabaseRoomsPublisher {
                 "\"status\":\"open\"," +
                 "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
                 appendRelayFieldsForOpenRoom(config) +
-                appendFutureNatFieldsForOpenRoom(config, hostPort) +
+                appendNatFieldsForOpenRoom(config, hostPort) +
                 "}";
     }
 
@@ -165,7 +165,7 @@ public final class SupabaseRoomsPublisher {
                 + "\"relay_status\":\"" + jsonEscape(config.relayStatus) + "\"";
     }
 
-    private static String appendFutureNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
+    private static String appendNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
         if (!Config.stunEnabled()) {
             return "";
         }

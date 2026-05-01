@@ -11,21 +11,17 @@ For full stack setup, see:
 
 - Store room metadata for host/client rendezvous.
 - Keep signaling separate from Minecraft traffic.
-- Support STUN and relay metadata with backward compatibility.
+- Use a single v1.0.0 schema including STUN and relay metadata.
 
 ## Migration Files
 
 - `migrations/20260430165635_remote_schema.sql`
-  - Base `public.rooms` table
-- `migrations/20260501061000_add_stun_candidate_columns.sql`
-  - STUN columns: `nat_method`, `public_endpoint`, `candidates`
-- `migrations/20260501100000_add_relay_columns.sql`
-  - Relay columns: `relay_endpoint`, `relay_token`, `relay_status`
+  - v1.0.0 baseline `public.rooms` table including STUN/relay columns
 
 ## Option A: Cloud Supabase
 
 1. Create/open a Supabase project.
-2. Apply migration SQL in order.
+2. Apply `migrations/20260430165635_remote_schema.sql`.
 3. Confirm all required columns exist on `public.rooms`.
 4. Put URL/key into `neoforge/run/config/nat_traversal_mod-common.toml` (local only).
 

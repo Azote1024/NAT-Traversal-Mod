@@ -1,4 +1,4 @@
-# NAT Traversal Mod (MVP)
+# NAT Traversal Mod v1.0.0
 
 管理者向けの全体手順です。英語版 `README.md` を正本とし、本ファイルは追従します。
 
@@ -21,7 +21,7 @@
 
 ## クイックスタート（管理者）
 
-1. `supabase/migrations/*.sql` を適用
+1. `supabase/migrations/20260430165635_remote_schema.sql` を適用
 2. relay-server を起動
 3. `neoforge/run/config/*.toml`（common/server/client）を設定
 4. Minecraft server (`runServer`) と client (`runClient`) を起動
@@ -58,7 +58,7 @@ Set-Location ".\neoforge"
 補足:
 
 - `relay_priority_mode` は `public_first`（既定）/`relay_first`
-- ドキュメント中の relay ポートは例示であり、設定で変更可能
+- relay ポートは設定で変更可能
 
 ## 検証ログ
 

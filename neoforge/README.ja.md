@@ -44,6 +44,6 @@ Set-Location ".\neoforge"
 
 ## 注意
 
-- ドキュメント中の relay ポートは例示であり、設定で変更可能
+- relay ポートは設定で変更可能
 
 
