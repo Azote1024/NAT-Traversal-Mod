@@ -1,22 +1,33 @@
-# NAT Traversal Mod (MVP) - 日本語ガイド
+# NAT Traversal Mod (MVP)
 
-このドキュメントは管理者向けの全体手順です。
+管理者向けの全体手順です。英語版 `README.md` を正本とし、本ファイルは追従します。
 
-## 構成
+## コンポーネント構成
 
-- `neoforge/` : Minecraft Mod 本体
-- `relay-server/` : TCP リレーサーバー
-- `supabase/` : シグナリング用スキーマ/migration
+- `neoforge/` - Minecraft mod（NeoForge 1.21.1）
+- `relay-server/` - 軽量TCPリレーサーバー
+- `supabase/` - `public.rooms` 用スキーマ/migration
 
-## クイックスタート
+## ドキュメントマップ
 
-1. Supabase で `supabase/migrations/*.sql` を適用
-2. `relay-server` を起動
-3. `neoforge/run/config/` の3ファイル（common/server/client）を設定
-4. `runServer` -> `runClient` の順で起動
-5. ログで relay 経路を確認
+- 全体（英語）: `README.md`
+- 全体（日本語）: `README.ja.md`
+- NeoForge単体（英語）: `neoforge/README.md`
+- NeoForge単体（日本語）: `neoforge/README.ja.md`
+- Relay単体（英語）: `relay-server/README.md`
+- Relay単体（日本語）: `relay-server/README.ja.md`
+- Supabase単体（英語）: `supabase/README.md`
+- Supabase単体（日本語）: `supabase/README.ja.md`
 
-## コマンド例（PowerShell）
+## クイックスタート（管理者）
+
+1. `supabase/migrations/*.sql` を適用
+2. relay-server を起動
+3. `neoforge/run/config/*.toml`（common/server/client）を設定
+4. Minecraft server (`runServer`) と client (`runClient`) を起動
+5. relay経路ログを確認
+
+### PowerShell例
 
 ```powershell
 Set-Location "<repo-root>"
@@ -36,9 +47,47 @@ Set-Location ".\neoforge"
 .\gradlew.bat runClient
 ```
 
-## セキュリティ
+## 設定分離
 
-- 実URL / 実キー / 実IP / 実トークンは docs に書かない
-- 機微値は各環境の `neoforge/run/config/*` でのみ管理
-- 例示ポート（例: `40000`）は設定で変更可能
+`neoforge/run/config/` 配下:
+
+- `nat_traversal_mod-common.toml`
+- `nat_traversal_mod-server.toml`
+- `nat_traversal_mod-client.toml`
+
+補足:
+
+- `relay_priority_mode` は `public_first`（既定）/`relay_first`
+- ドキュメント中の relay ポートは例示であり、設定で変更可能
+
+## 検証ログ
+
+サーバー（`neoforge/run/logs/latest.log`）:
+
+- `Room published`
+- `Relay host connector paired`
+- `Room closed`
+
+クライアント（`neoforge/run/logs/latest.log`）:
+
+- `Intercept hit`
+- `Use local relay client connector` または `Use public_endpoint from room`
+- `Resolved room target`
+
+relay標準出力:
+
+- `waiting counterpart token=...`
+- `pairing token=...`
+
+## ビルド
+
+```powershell
+Set-Location "<repo-root>"
+Set-Location ".\neoforge"
+.\gradlew.bat --no-daemon compileJava
+```
+
+## 運用ポリシー
+
+- 運用ルールは `docs/security-operations.md` を参照してください。
 

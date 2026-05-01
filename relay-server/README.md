@@ -2,6 +2,11 @@
 
 Simple self-hosted TCP relay server for friends-only usage.
 
+For full stack setup, see:
+
+- English: `../README.md`
+- Japanese: `../README.ja.md`
+
 ## Goal (minimum)
 
 - Provide raw TCP byte relay between one `host` and one `client`.
@@ -33,7 +38,7 @@ When both roles with same token are connected, server starts bidirectional byte 
 - Default config file: `relay_config.toml`
 - Minimal keys:
   - `host`
-  - `port`
+  - `port` (default/example is `40000`, configurable)
   - `handshake_timeout`
 
 ## Run (uv)
@@ -64,9 +69,10 @@ uv run python .\test_relay.py
 ## Ubuntu Notes (firewall)
 
 - If relay server runs on Ubuntu with UFW, allow relay port explicitly.
+- Replace `<relay-port>` with your configured port value (`40000` is the default example).
 
 ```bash
-sudo ufw allow 40000/tcp
+sudo ufw allow <relay-port>/tcp
 sudo ufw status
 ```
 
