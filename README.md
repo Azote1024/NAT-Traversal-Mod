@@ -136,7 +136,8 @@ Minecraft Java Edition (NeoForge 1.21.1) 向けの、友人間利用を想定し
 ## ビルド
 
 ```powershell
-Set-Location "C:\Users\nitro\Documents\GitHub\NAT-Traversal-Mod\neoforge"
+Set-Location "<repo-root>"
+Set-Location ".\neoforge"
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot"
 .\gradlew.bat --no-daemon compileJava
 ```

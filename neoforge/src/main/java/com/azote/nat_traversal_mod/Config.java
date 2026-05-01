@@ -9,11 +9,11 @@ public class Config {
 
     private static final ModConfigSpec.ConfigValue<String> SUPABASE_URL_VALUE = COMMON_BUILDER
             .comment("Supabase project URL. Example: https://xxxx.supabase.co")
-            .define("supabase_url", """");
+            .define("supabase_url", "");
 
     private static final ModConfigSpec.ConfigValue<String> SUPABASE_KEY_VALUE = COMMON_BUILDER
             .comment("Supabase publishable key used for REST requests")
-            .define("supabase_key", """");
+            .define("supabase_key", "");
 
     private static final ModConfigSpec.ConfigValue<String> ROOM_NAME_VALUE = COMMON_BUILDER
             .comment("Fixed room_name key in public.rooms")

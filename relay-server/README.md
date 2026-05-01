@@ -39,14 +39,16 @@ When both roles with same token are connected, server starts bidirectional byte 
 ## Run (uv)
 
 ```powershell
-Set-Location "C:\Users\nitro\Documents\GitHub\NAT-Traversal-Mod\relay-server"
+Set-Location "<repo-root>"
+Set-Location ".\relay-server"
 uv run python .\start.py
 ```
 
 Optional: use another config file via env var.
 
 ```powershell
-Set-Location "C:\Users\nitro\Documents\GitHub\NAT-Traversal-Mod\relay-server"
+Set-Location "<repo-root>"
+Set-Location ".\relay-server"
 $env:RELAY_CONFIG = "relay_config.toml"
 uv run python .\start.py
 ```
@@ -54,7 +56,8 @@ uv run python .\start.py
 ## Smoke Test (uv)
 
 ```powershell
-Set-Location "C:\Users\nitro\Documents\GitHub\NAT-Traversal-Mod\relay-server"
+Set-Location "<repo-root>"
+Set-Location ".\relay-server"
 uv run python .\test_relay.py
 ```
 
