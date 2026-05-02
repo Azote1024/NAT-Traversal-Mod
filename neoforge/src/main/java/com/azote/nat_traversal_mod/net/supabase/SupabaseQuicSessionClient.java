@@ -1,6 +1,7 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.supabase;
 
-import com.azote.nat_traversal_mod.Config;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import java.io.IOException;
@@ -12,19 +13,19 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-final class SupabaseQuicSessionClient {
+public final class SupabaseQuicSessionClient {
 	private static final Pattern ATTEMPT_ID_PATTERN = Pattern.compile("\"attempt_id\"\\s*:\\s*\"([^\"]*)\"");
 	private static volatile boolean peerAttemptsUnavailableLogged;
 
 	private SupabaseQuicSessionClient() {
 	}
 
-	static Optional<String> fetchSessionBody(String roomName) {
-		String supabaseUrl = Config.supabaseUrl();
-		String supabaseKey = Config.supabaseKey();
+	public static Optional<String> fetchSessionBody(String roomName) {
+		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+		String supabaseUrl = runtimeConfig.supabaseUrl();
+		String supabaseKey = runtimeConfig.supabaseApiKey();
 		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
 			return Optional.empty();
 		}
@@ -106,18 +107,18 @@ final class SupabaseQuicSessionClient {
 		return Optional.empty();
 	}
 
-	static Optional<String> fetchCurrentAttemptId(String roomName) {
+	public static Optional<String> fetchCurrentAttemptId(String roomName) {
 		return fetchSessionBody(roomName).flatMap(SupabaseQuicSessionClient::extractAttemptId);
 	}
 
-	static void markClientAttemptStarted(String roomName, String attemptId) {
+	public static void markClientAttemptStarted(String roomName, String attemptId) {
 		patchSession(roomName, "{"
 				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
 				+ "\"last_error_code\":\"\""
 				+ "}", "Failed to mark client attempt id");
 	}
 
-	static void markClientPunchSent(String roomName, String attemptId) {
+	public static void markClientPunchSent(String roomName, String attemptId) {
 		patchSession(roomName, "{"
 				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
 				+ "\"punch_status\":\"client_probe_sent\","
@@ -126,7 +127,7 @@ final class SupabaseQuicSessionClient {
 				+ "}", "Failed to mark client punch status");
 	}
 
-	static void markHostPunchProbing(String roomName) {
+	public static void markHostPunchProbing(String roomName) {
 		patchSession(roomName, "{"
 				+ "\"punch_status\":\"probing\","
 				+ "\"host_probe_sent_at\":\"" + Instant.now() + "\","
@@ -134,18 +135,18 @@ final class SupabaseQuicSessionClient {
 				+ "}", "Failed to mark host punch probing");
 	}
 
-	static void markHostPunchEstablished(String roomName) {
+	public static void markHostPunchEstablished(String roomName) {
 		patchSession(roomName, "{"
 				+ "\"punch_status\":\"established\","
 				+ "\"last_error_code\":\"\""
 				+ "}", "Failed to mark host punch established");
 	}
 
-	static void markHostPunchDown(String roomName) {
+	public static void markHostPunchDown(String roomName) {
 		markHostPunchDown(roomName, "");
 	}
 
-	static void markHostPunchDown(String roomName, String errorCode) {
+	public static void markHostPunchDown(String roomName, String errorCode) {
 		String normalizedErrorCode = errorCode == null ? "" : errorCode.trim();
 		if (normalizedErrorCode.length() > 64) {
 			normalizedErrorCode = normalizedErrorCode.substring(0, 64);
@@ -156,7 +157,7 @@ final class SupabaseQuicSessionClient {
 				+ "}", "Failed to mark host punch down");
 	}
 
-	static void markRouteDecisionQuicTry(String roomName) {
+	public static void markRouteDecisionQuicTry(String roomName) {
 		patchSession(roomName, "{"
 				+ "\"route_decision\":\"quic_try\","
 				+ "\"relay_reason\":\"\","
@@ -164,7 +165,7 @@ final class SupabaseQuicSessionClient {
 				+ "}", "Failed to mark route decision");
 	}
 
-	static void upsertPeerAttempt(
+	public static void upsertPeerAttempt(
 			String roomName,
 			String clientKey,
 			String attemptId,
@@ -174,8 +175,9 @@ final class SupabaseQuicSessionClient {
 			String lastErrorCode,
 			boolean closed
 	) {
-		String supabaseUrl = Config.supabaseUrl();
-		String supabaseKey = Config.supabaseKey();
+		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+		String supabaseUrl = runtimeConfig.supabaseUrl();
+		String supabaseKey = runtimeConfig.supabaseApiKey();
 		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank() || clientKey.isBlank() || attemptId.isBlank()) {
 			return;
 		}
@@ -246,12 +248,12 @@ final class SupabaseQuicSessionClient {
 	}
 
 	private static Optional<String> extractAttemptId(String responseBody) {
-		Matcher matcher = ATTEMPT_ID_PATTERN.matcher(responseBody);
-		if (!matcher.find()) {
+		Optional<JsonRegexDtoParser.JsonFieldMatch> match = JsonRegexDtoParser.findFirst(ATTEMPT_ID_PATTERN, responseBody);
+		if (match.isEmpty()) {
 			return Optional.empty();
 		}
 
-		String attemptId = matcher.group(1).trim();
+		String attemptId = match.get().trimmedValue();
 		if (attemptId.isEmpty()) {
 			return Optional.empty();
 		}
@@ -260,8 +262,9 @@ final class SupabaseQuicSessionClient {
 
 
 	private static void patchSession(String roomName, String payload, String errorLogMessage) {
-		String supabaseUrl = Config.supabaseUrl();
-		String supabaseKey = Config.supabaseKey();
+		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+		String supabaseUrl = runtimeConfig.supabaseUrl();
+		String supabaseKey = runtimeConfig.supabaseApiKey();
 		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
 			return;
 		}

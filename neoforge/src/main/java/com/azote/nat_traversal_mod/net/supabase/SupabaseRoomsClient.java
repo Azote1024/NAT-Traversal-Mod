@@ -1,7 +1,11 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.supabase;
 
-import com.azote.nat_traversal_mod.Config;
+import com.azote.nat_traversal_mod.config.runtime.ConnectStrategy;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.net.QuicP2pManager;
+import com.azote.nat_traversal_mod.net.ResolvedTarget;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -14,22 +18,23 @@ public final class SupabaseRoomsClient {
     }
 
     public static Optional<ResolvedTarget> resolve() {
-        String supabaseUrl = Config.supabaseUrl();
-        String supabaseKey = Config.supabaseKey();
-        String roomName = Config.roomName();
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        String supabaseUrl = runtimeConfig.supabaseUrl();
+        String supabaseKey = runtimeConfig.supabaseApiKey();
+        String roomName = runtimeConfig.roomName();
 
         if (supabaseUrl.isBlank()) {
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] supabase_url is empty. Fallback to original target.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] supabase.url is empty. Fallback to original target.");
             return Optional.empty();
         }
 
         if (supabaseKey.isBlank()) {
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] supabase_key is empty. Fallback to original target.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] supabase.api_key is empty. Fallback to original target.");
             return Optional.empty();
         }
 
         if (roomName.isBlank()) {
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] room_name is empty. Fallback to original target.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] mode.room_name is empty. Fallback to original target.");
             return Optional.empty();
         }
 
@@ -41,22 +46,28 @@ public final class SupabaseRoomsClient {
         Optional<RoomSnapshotParser.RoomSnapshot> snapshot = RoomSnapshotParser.parse(roomBody.get(), roomName);
         if (snapshot.isEmpty()) {
             NatTraversalMod.LOGGER.warn(
-                    "[nat-traversal-mod] Room not found or invalid data. room_name='{}'. Fallback to original target.",
+                    "[nat-traversal-mod] Room not found or invalid data. mode.room_name='{}'. Fallback to original target.",
                     roomName
             );
             return Optional.empty();
         }
 
-        return resolveFromSnapshot(snapshot.get(), roomName);
+        return resolveFromSnapshot(snapshot.get(), roomName, runtimeConfig);
     }
 
-    private static Optional<ResolvedTarget> resolveFromSnapshot(RoomSnapshotParser.RoomSnapshot snapshot, String roomName) {
+    private static Optional<ResolvedTarget> resolveFromSnapshot(
+            RoomSnapshotParser.RoomSnapshot snapshot,
+            String roomName,
+            RuntimeConfigSnapshot runtimeConfig
+    ) {
         String body = snapshot.rawBody();
 
         long ageMillis = Duration.between(snapshot.updatedAt(), Instant.now()).toMillis();
         boolean isFresh = ageMillis >= 0L && ageMillis <= ROOM_FRESHNESS_TTL_MILLIS;
+        ConnectStrategy strategy = runtimeConfig.connectStrategy();
+        boolean quicCapable = strategy == ConnectStrategy.QUIC_FIRST || strategy == ConnectStrategy.TCP_QUIC_RELAY;
         if (!isFresh) {
-            if (!Config.quicFirstMode() && !Config.tcpQuicRelayMode()) {
+            if (!quicCapable) {
                 NatTraversalMod.LOGGER.warn(
                         "[nat-traversal-mod] Room data is stale. room_name='{}', age_ms={}, ttl_ms={}. Fallback to original target.",
                         roomName,
@@ -83,7 +94,7 @@ public final class SupabaseRoomsClient {
             );
         }
 
-        if (Config.quicFirstMode() || Config.tcpQuicRelayMode()) {
+        if (quicCapable) {
             SupabaseQuicSessionClient.markRouteDecisionQuicTry(roomName);
             Optional<String> quicSessionBody = SupabaseQuicSessionClient.fetchSessionBody(roomName);
             if (quicSessionBody.isPresent()) {
@@ -102,27 +113,27 @@ public final class SupabaseRoomsClient {
                     "[nat-traversal-mod] QUIC route unavailable. room_name='{}'. Try relay/public fallback.",
                     roomName
             );
-            Optional<ResolvedTarget> fallbackTarget = resolveRelayThenPublic(snapshot, roomName);
+            Optional<ResolvedTarget> fallbackTarget = resolveRelayThenPublic(snapshot, roomName, runtimeConfig);
             if (fallbackTarget.isPresent()) {
                 return fallbackTarget;
             }
-        } else if (Config.relayFirstMode()) {
+        } else if (strategy == ConnectStrategy.RELAY_FIRST) {
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] relay_priority_mode=relay_first. Try relay endpoint before public_endpoint. room_name='{}'.",
+                    "[nat-traversal-mod] mode.connect_strategy=relay_first. Try relay endpoint before public_endpoint. mode.room_name='{}'.",
                     roomName
             );
-            Optional<ResolvedTarget> relayFirstTarget = resolveRelayThenPublic(snapshot, roomName);
+            Optional<ResolvedTarget> relayFirstTarget = resolveRelayThenPublic(snapshot, roomName, runtimeConfig);
             if (relayFirstTarget.isPresent()) {
                 return relayFirstTarget;
             }
         } else {
-            Optional<ResolvedTarget> publicFirstTarget = resolvePublicThenRelay(snapshot, roomName);
+            Optional<ResolvedTarget> publicFirstTarget = resolvePublicThenRelay(snapshot, roomName, runtimeConfig);
             if (publicFirstTarget.isPresent()) {
                 return publicFirstTarget;
             }
         }
 
-        if (Config.stunEnabled()) {
+        if (runtimeConfig.stunEnabled()) {
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] public_endpoint is not used. room_name='{}'. Fallback to host_ip:host_port.",
                     roomName
@@ -132,20 +143,28 @@ public final class SupabaseRoomsClient {
         return Optional.of(new ResolvedTarget(snapshot.hostIp(), snapshot.hostPort()));
     }
 
-    private static Optional<ResolvedTarget> resolveRelayThenPublic(RoomSnapshotParser.RoomSnapshot snapshot, String roomName) {
-        Optional<ResolvedTarget> relayEndpointTarget = RoomRouteSelector.tryRelayEndpoint(snapshot, roomName);
+    private static Optional<ResolvedTarget> resolveRelayThenPublic(
+            RoomSnapshotParser.RoomSnapshot snapshot,
+            String roomName,
+            RuntimeConfigSnapshot runtimeConfig
+    ) {
+        Optional<ResolvedTarget> relayEndpointTarget = RoomRouteSelector.tryRelayEndpoint(snapshot, roomName, runtimeConfig);
         if (relayEndpointTarget.isPresent()) {
             return relayEndpointTarget;
         }
-        return RoomRouteSelector.tryPublicEndpoint(snapshot, roomName);
+        return RoomRouteSelector.tryPublicEndpoint(snapshot, roomName, runtimeConfig);
     }
 
-    private static Optional<ResolvedTarget> resolvePublicThenRelay(RoomSnapshotParser.RoomSnapshot snapshot, String roomName) {
-        Optional<ResolvedTarget> publicEndpointTarget = RoomRouteSelector.tryPublicEndpoint(snapshot, roomName);
+    private static Optional<ResolvedTarget> resolvePublicThenRelay(
+            RoomSnapshotParser.RoomSnapshot snapshot,
+            String roomName,
+            RuntimeConfigSnapshot runtimeConfig
+    ) {
+        Optional<ResolvedTarget> publicEndpointTarget = RoomRouteSelector.tryPublicEndpoint(snapshot, roomName, runtimeConfig);
         if (publicEndpointTarget.isPresent()) {
             return publicEndpointTarget;
         }
-        return RoomRouteSelector.tryRelayEndpoint(snapshot, roomName);
+        return RoomRouteSelector.tryRelayEndpoint(snapshot, roomName, runtimeConfig);
     }
 
 }

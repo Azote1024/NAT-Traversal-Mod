@@ -1,4 +1,4 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.routing;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

@@ -1,7 +1,7 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.supabase;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.net.StunClient;
 
 import java.io.IOException;
 import java.net.URI;
@@ -176,8 +176,8 @@ public final class SupabaseRoomsPublisher {
                 "\"direct_endpoint\":\"" + SupabaseJsonUtil.escape(directEndpoint) + "\"," +
                 "\"quic_endpoint\":\"" + SupabaseJsonUtil.escape(quicEndpoint) + "\"," +
                 "\"quic_status\":\"" + SupabaseJsonUtil.escape(quicStatus) + "\"," +
-                "\"quic_attempts\":" + Config.quicAttempts() + "," +
-                "\"quic_attempt_interval_ms\":" + Config.quicAttemptIntervalMs() +
+                "\"quic_attempts\":" + config.quicAttempts + "," +
+                "\"quic_attempt_interval_ms\":" + config.quicAttemptIntervalMs +
                 "}";
 
         return ",\"candidates\":" + candidates;
@@ -185,16 +185,18 @@ public final class SupabaseRoomsPublisher {
 
 
     private static PublishConfig loadPublishConfig() {
-        String supabaseUrl = Config.supabaseUrl();
-        String supabaseKey = Config.supabaseKey();
-        String roomName = Config.roomName();
-        String hostName = Config.publishHostName();
-        String hostIp = Config.publishHostIp();
-        String relayEndpoint = Config.relayPublishEndpoint();
-        String relayToken = Config.relayToken();
-        String relayStatus = Config.relayStatus();
-        String quicEndpoint = Config.quicPublishEndpoint();
-        String quicStatus = Config.quicStatus();
+        PublishConfigSnapshot snapshot = PublishConfigSnapshot.capture();
+
+        String supabaseUrl = snapshot.supabaseUrl();
+        String supabaseKey = snapshot.supabaseKey();
+        String roomName = snapshot.roomName();
+        String hostName = snapshot.hostName();
+        String hostIp = snapshot.hostIp();
+        String relayEndpoint = snapshot.relayEndpoint();
+        String relayToken = snapshot.relayToken();
+        String relayStatus = snapshot.relayStatus();
+        String quicEndpoint = snapshot.quicEndpoint();
+        String quicStatus = snapshot.quicStatus();
 
         if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
             NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: supabase config is incomplete.");
@@ -206,7 +208,23 @@ public final class SupabaseRoomsPublisher {
             return null;
         }
 
-        return new PublishConfig(supabaseUrl, supabaseKey, roomName, hostName, hostIp, relayEndpoint, relayToken, relayStatus, quicEndpoint, quicStatus);
+        return new PublishConfig(
+                supabaseUrl,
+                supabaseKey,
+                roomName,
+                hostName,
+                hostIp,
+                relayEndpoint,
+                relayToken,
+                relayStatus,
+                quicEndpoint,
+                quicStatus,
+                snapshot.stunEnabled(),
+                snapshot.stunServer(),
+                snapshot.stunTimeoutMs(),
+                snapshot.quicAttempts(),
+                snapshot.quicAttemptIntervalMs()
+        );
     }
 
     private static String trimBody(String body) {
@@ -298,7 +316,12 @@ public final class SupabaseRoomsPublisher {
             String relayToken,
             String relayStatus,
             String quicEndpoint,
-            String quicStatus
+            String quicStatus,
+            boolean stunEnabled,
+            String stunServer,
+            int stunTimeoutMs,
+            int quicAttempts,
+            int quicAttemptIntervalMs
     ) {
     }
 
@@ -311,11 +334,11 @@ public final class SupabaseRoomsPublisher {
 
     private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {
         String directEndpoint = config.hostIp + ":" + hostPort;
-        if (!Config.stunEnabled()) {
+        if (!config.stunEnabled) {
             return new NatClassification("unknown", "", "direct", directEndpoint);
         }
 
-        Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs());
+        Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(config.stunServer, config.stunTimeoutMs);
         String publicEndpoint = stunPublicEndpoint.orElse(directEndpoint);
         if (stunPublicEndpoint.isEmpty()) {
             NatTraversalMod.LOGGER.warn(

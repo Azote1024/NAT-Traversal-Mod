@@ -1,4 +1,4 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.supabase;
 
 import java.io.IOException;
 import java.net.http.HttpClient;

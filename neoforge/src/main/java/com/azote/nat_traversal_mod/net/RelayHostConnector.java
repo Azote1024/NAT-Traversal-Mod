@@ -1,7 +1,8 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -88,19 +89,20 @@ public final class RelayHostConnector {
     }
 
     private RelaySessionConfig loadConfig() {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
 
-        String status = Config.relayStatus();
+        String status = runtimeConfig.relayStatus();
         if (!"ready".equalsIgnoreCase(status)) {
             return null;
         }
 
-        String token = Config.relayToken();
+        String token = runtimeConfig.relayToken();
         if (token.isBlank()) {
             NatTraversalMod.LOGGER.warn("[nat-traversal-mod] relay_token is empty. Relay host connector disabled.");
             return null;
         }
 
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpointForServer(), "relay_connect_endpoint_server");
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(runtimeConfig.relayConnectEndpointServer(), "relay.connect_endpoint");
         return endpoint.map(value -> new RelaySessionConfig(value, token)).orElse(null);
     }
 

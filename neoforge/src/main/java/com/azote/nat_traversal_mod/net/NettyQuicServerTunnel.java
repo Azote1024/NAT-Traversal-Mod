@@ -1,7 +1,9 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
+import com.azote.nat_traversal_mod.net.supabase.SupabaseQuicSessionClient;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
@@ -49,23 +51,27 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         stop();
         establishedMarked.set(false);
 
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.quicPublishEndpoint(), "quic_publish_endpoint");
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(runtimeConfig.quicPublishEndpoint(), "quic.publish_endpoint");
         if (endpoint.isEmpty()) {
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_server phase=disabled room_name='{}' reason='invalid_quic_publish_endpoint'",
-                    Config.roomName()
+                    "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_DISABLED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' reason='invalid_quic.publish_endpoint'",
+                    runtimeConfig.roomName()
             );
             return;
         }
 
-        File certFile = resolveTlsFile(Config.quicTlsCertFile());
-        File keyFile = resolveTlsFile(Config.quicTlsKeyFile());
+        File certFile = resolveTlsFile(runtimeConfig.quicTlsCertFile());
+        File keyFile = resolveTlsFile(runtimeConfig.quicTlsKeyFile());
         if (!certFile.isFile() || !keyFile.isFile()) {
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_server phase=disabled room_name='{}' reason='tls_file_missing' cert='{}' key='{}'",
-                    Config.roomName(),
-                    Config.quicTlsCertFile(),
-                    Config.quicTlsKeyFile()
+                    "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_DISABLED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' reason='tls_file_missing' cert='{}' key='{}'",
+                    runtimeConfig.roomName(),
+                    runtimeConfig.quicTlsCertFile(),
+                    runtimeConfig.quicTlsKeyFile()
             );
             return;
         }
@@ -104,27 +110,30 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             udpChannel = bindUdpChannel(codec, bindTarget);
 
             running = true;
-            SupabaseQuicSessionClient.markHostPunchProbing(Config.roomName());
-            String attemptId = currentAttemptId();
+            SupabaseQuicSessionClient.markHostPunchProbing(runtimeConfig.roomName());
+            String attemptId = currentAttemptId(runtimeConfig.roomName());
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_server phase=started room_name='{}' attempt_id='{}' bind='{}:{}' target='127.0.0.1:{}'",
-                    Config.roomName(),
+                    "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_STARTED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' bind='{}:{}' target='127.0.0.1:{}'",
+                    runtimeConfig.roomName(),
                     attemptId,
                     bindTarget.host(),
                     bindTarget.port(),
                     targetServerPort
             );
         } catch (Throwable exception) {
-            String errorCode = classifyStartErrorCode(exception);
-            String attemptId = currentAttemptId();
+            String errorCode = QuicErrorCodes.classifyServerStartError(exception, isBindFailure(exception));
+            String attemptId = currentAttemptId(runtimeConfig.roomName());
             NatTraversalMod.LOGGER.warn(
-                    "[nat-traversal-mod] quic_server phase=start_failed room_name='{}' attempt_id='{}' error_code='{}'",
-                    Config.roomName(),
+                    "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_START_FAILED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
+                            + QuicLogSchema.FIELD_ERROR_CODE + "='{}'",
+                    runtimeConfig.roomName(),
                     attemptId,
                     errorCode,
                     exception
             );
-            SupabaseQuicSessionClient.markHostPunchDown(Config.roomName(), errorCode);
+            SupabaseQuicSessionClient.markHostPunchDown(runtimeConfig.roomName(), errorCode);
             stop();
         }
     }
@@ -212,32 +221,12 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         return "0.0.0.0".equals(host) || "::".equals(host) || "[::]".equals(host);
     }
 
-    private static String classifyStartErrorCode(Throwable throwable) {
-        if (throwable == null) {
-            return "start_failed";
-        }
-        if (isBindFailure(throwable)) {
-            return "bind_failed";
-        }
-        if (throwable instanceof UnsatisfiedLinkError) {
-            return "native_unavailable";
-        }
-
-        String text = throwable.toString().toLowerCase();
-        if (text.contains("native") || text.contains("quiche")) {
-            return "native_unavailable";
-        }
-        if (text.contains("cert") || text.contains("tls") || text.contains("ssl")) {
-            return "tls_failed";
-        }
-        return "start_failed";
-    }
-
     @Override
     public synchronized void stop() {
         running = false;
         establishedMarked.set(false);
-        SupabaseQuicSessionClient.markHostPunchDown(Config.roomName());
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        SupabaseQuicSessionClient.markHostPunchDown(runtimeConfig.roomName());
 
         if (udpChannel != null) {
             udpChannel.close().syncUninterruptibly();
@@ -257,11 +246,13 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
 
     private void handleIncomingStream(QuicStreamChannel streamChannel) {
         if (establishedMarked.compareAndSet(false, true)) {
-            SupabaseQuicSessionClient.markHostPunchEstablished(Config.roomName());
-            String attemptId = currentAttemptId();
+            RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+            SupabaseQuicSessionClient.markHostPunchEstablished(runtimeConfig.roomName());
+            String attemptId = currentAttemptId(runtimeConfig.roomName());
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_server phase=established room_name='{}' attempt_id='{}'",
-                    Config.roomName(),
+                    "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_ESTABLISHED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}'",
+                    runtimeConfig.roomName(),
                     attemptId
             );
         }
@@ -330,8 +321,8 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         return path.subpath(1, path.getNameCount());
     }
 
-    private static String currentAttemptId() {
-        return SupabaseQuicSessionClient.fetchCurrentAttemptId(Config.roomName()).orElse("");
+    private static String currentAttemptId(String roomName) {
+        return SupabaseQuicSessionClient.fetchCurrentAttemptId(roomName).orElse("");
     }
 }
 

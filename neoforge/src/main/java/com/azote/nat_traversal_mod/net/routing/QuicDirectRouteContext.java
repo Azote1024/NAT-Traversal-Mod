@@ -1,4 +1,6 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.routing;
+
+import com.azote.nat_traversal_mod.net.RelayEndpoint;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;

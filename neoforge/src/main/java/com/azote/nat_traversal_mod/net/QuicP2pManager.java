@@ -1,11 +1,11 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
+import com.azote.nat_traversal_mod.net.routing.QuicDirectRouteContext;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * First implementation slice for QUIC-first routing.
@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * Transport establishment is intentionally minimal and returns empty when no direct hint exists.
  */
 public final class QuicP2pManager {
-    private enum QuicRouteState {
+    enum QuicRouteState {
         DISABLED,
         HINT_MISSING,
         NOT_READY,
@@ -26,12 +26,6 @@ public final class QuicP2pManager {
         EXHAUSTED
     }
 
-    private static final Pattern QUIC_ENDPOINT_PATTERN = Pattern.compile("\"quic_endpoint\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern QUIC_STATUS_PATTERN = Pattern.compile("\"quic_status\"\\s*:\\s*\"([^\"]*)\"");
-    private static final Pattern PUNCH_ENDPOINT_PATTERN = Pattern.compile("\"punch_endpoint\"\\s*:\\s*\"([^\"]*)\"");
-    private static final Pattern PUNCH_STATUS_PATTERN = Pattern.compile("\"punch_status\"\\s*:\\s*\"([^\"]*)\"");
-    private static final Pattern PUNCH_TOKEN_PATTERN = Pattern.compile("\"punch_token\"\\s*:\\s*\"([^\"]*)\"");
-    private static final Pattern RELAY_ENDPOINT_PATTERN = Pattern.compile("\"relay_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final QuicTransport TRANSPORT = createTransport();
     private static final String CLIENT_KEY = UUID.randomUUID().toString();
 
@@ -55,101 +49,31 @@ public final class QuicP2pManager {
     }
 
     public static Optional<ResolvedTarget> tryResolveFromRoom(String body, String roomName) {
-        if (!Config.quicEnabled()) {
-            logState(roomName, QuicRouteState.DISABLED, "quic_enabled=false");
+        Optional<String> endpoint = QuicRouteHintDecider.decideEndpointFromRoomBody(body, roomName);
+        if (endpoint.isEmpty()) {
             return Optional.empty();
         }
-
-        Optional<String> statusValue = findFirst(QUIC_STATUS_PATTERN, body);
-        if (statusValue.isEmpty()) {
-            logState(roomName, QuicRouteState.HINT_MISSING, "quic_status is missing");
-            return Optional.empty();
-        }
-
-        String status = statusValue.get().trim();
-        if (!"ready".equalsIgnoreCase(status)) {
-            if (!status.isEmpty()) {
-                NatTraversalMod.LOGGER.info(
-                        "[nat-traversal-mod] QUIC hint exists but status is not ready. room_name='{}', quic_status='{}'",
-                        roomName,
-                        status
-                );
-            }
-            logState(roomName, QuicRouteState.NOT_READY, "quic_status=" + status);
-            return Optional.empty();
-        }
-
-        Optional<String> endpointValue = findFirst(QUIC_ENDPOINT_PATTERN, body);
-        if (endpointValue.isEmpty()) {
-            logState(roomName, QuicRouteState.HINT_MISSING, "quic_endpoint is missing");
-            return Optional.empty();
-        }
-
-        String endpoint = endpointValue.get().trim();
-        Matcher relayMatcher = RELAY_ENDPOINT_PATTERN.matcher(body);
-        if (relayMatcher.find()) {
-            String relayEndpoint = relayMatcher.group(1).trim();
-            if (!relayEndpoint.isEmpty() && relayEndpoint.equalsIgnoreCase(endpoint)) {
-                NatTraversalMod.LOGGER.info(
-                        "[nat-traversal-mod] Skip QUIC attempt because quic_endpoint matches relay_endpoint. room_name='{}'.",
-                        roomName
-                );
-                logState(roomName, QuicRouteState.BLOCKED_BY_RELAY_ENDPOINT, "quic_endpoint matches relay_endpoint");
-                return Optional.empty();
-            }
-        }
-
-        return tryActivateEndpoint(endpoint, body, roomName);
+        return tryActivateEndpoint(endpoint.get(), body, roomName);
     }
 
     public static Optional<ResolvedTarget> tryResolveFromSessionBody(String body, String roomName) {
-        if (!Config.quicEnabled()) {
-            logState(roomName, QuicRouteState.DISABLED, "quic_enabled=false");
+        Optional<String> endpoint = QuicRouteHintDecider.decideEndpointFromSessionBody(body, roomName);
+        if (endpoint.isEmpty()) {
             return Optional.empty();
         }
-
-        Optional<String> statusValue = findFirst(QUIC_STATUS_PATTERN, body);
-        if (statusValue.isEmpty()) {
-            logState(roomName, QuicRouteState.HINT_MISSING, "quic_sessions.quic_status is missing");
-            return Optional.empty();
-        }
-
-        String status = statusValue.get().trim();
-        if (!"ready".equalsIgnoreCase(status)) {
-            logState(roomName, QuicRouteState.NOT_READY, "quic_sessions.quic_status=" + status);
-            return Optional.empty();
-        }
-
-        Optional<String> endpointValue = findFirst(QUIC_ENDPOINT_PATTERN, body);
-        if (endpointValue.isEmpty()) {
-            logState(roomName, QuicRouteState.HINT_MISSING, "quic_sessions.quic_endpoint is missing");
-            return Optional.empty();
-        }
-
-        return tryActivateEndpoint(endpointValue.get().trim(), body, roomName);
+        return tryActivateEndpoint(endpoint.get(), body, roomName);
     }
 
     private static Optional<ResolvedTarget> tryActivateEndpoint(String endpoint, String roomBody, String roomName) {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         Optional<RelayEndpoint> parsedEndpoint = RelayEndpoint.parse(endpoint, "quic_endpoint");
         if (parsedEndpoint.isEmpty()) {
             logState(roomName, QuicRouteState.INVALID_ENDPOINT, "invalid quic_endpoint=" + endpoint);
             return Optional.empty();
         }
         RelayEndpoint quicEndpoint = parsedEndpoint.get();
-        String attemptId = UUID.randomUUID().toString();
-        SupabaseQuicSessionClient.markClientAttemptStarted(roomName, attemptId);
-        SupabaseQuicSessionClient.upsertPeerAttempt(
-                roomName,
-                CLIENT_KEY,
-                attemptId,
-                "unknown",
-                "quic_try",
-                "idle",
-                "",
-                false
-        );
-
-        prepareHolePunch(roomBody, roomName, quicEndpoint, attemptId);
+        String attemptId = QuicAttemptRecorder.startAttempt(roomName, CLIENT_KEY);
+        QuicHolePunchCoordinator.prepareOneShotPunch(roomBody, roomName, quicEndpoint, attemptId, CLIENT_KEY);
 
         if (QuicDirectConnectorFactory.isOperational()) {
             QuicDirectRouteContext.set(quicEndpoint, attemptId);
@@ -173,8 +97,8 @@ public final class QuicP2pManager {
             return Optional.empty();
         }
 
-        int attempts = Config.quicAttempts();
-        int intervalMs = Config.quicAttemptIntervalMs();
+        int attempts = runtimeConfig.quicAttempts();
+        int intervalMs = runtimeConfig.quicAttemptIntervalMs();
         for (int attempt = 1; attempt <= attempts; attempt++) {
             logState(roomName, QuicRouteState.ATTEMPTING, "attempt=" + attempt + "/" + attempts);
             NatTraversalMod.LOGGER.info(
@@ -183,7 +107,7 @@ public final class QuicP2pManager {
                     attempts,
                     roomName,
                     endpoint,
-                    Config.quicTlsMode()
+                    runtimeConfig.quicTlsMode()
             );
 
             Optional<ResolvedTarget> localTarget = TRANSPORT.tryActivate(quicEndpoint, roomName);
@@ -211,59 +135,7 @@ public final class QuicP2pManager {
         return Optional.empty();
     }
 
-    private static void prepareHolePunch(String roomBody, String roomName, RelayEndpoint quicEndpoint, String attemptId) {
-        Optional<String> punchStatusValue = findFirst(PUNCH_STATUS_PATTERN, roomBody).map(String::trim);
-        if (punchStatusValue.isEmpty() || !shouldSendPunch(punchStatusValue.get())) {
-            return;
-        }
-
-        Optional<String> punchEndpointValue = findFirst(PUNCH_ENDPOINT_PATTERN, roomBody)
-                .or(() -> Optional.of(quicEndpoint.host() + ":" + quicEndpoint.port()));
-        Optional<RelayEndpoint> punchEndpoint = punchEndpointValue.flatMap(value -> RelayEndpoint.parse(value.trim(), "punch_endpoint"));
-        if (punchEndpoint.isEmpty()) {
-            return;
-        }
-
-        String punchToken = findFirst(PUNCH_TOKEN_PATTERN, roomBody).orElse("");
-        boolean punched = UdpHolePunchClient.oneShotPunch(punchEndpoint.get(), roomName, punchToken, 3, 120);
-        if (punched) {
-            SupabaseQuicSessionClient.markClientPunchSent(roomName, attemptId);
-            SupabaseQuicSessionClient.upsertPeerAttempt(
-                    roomName,
-                    CLIENT_KEY,
-                    attemptId,
-                    "unknown",
-                    "quic_try",
-                    "client_probe_sent",
-                    "",
-                    false
-            );
-            NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] One-shot UDP hole punch sent. room_name='{}', attempt_id='{}', endpoint='{}:{}'",
-                    roomName,
-                    attemptId,
-                    punchEndpoint.get().host(),
-                    punchEndpoint.get().port()
-            );
-        }
-    }
-
-    private static boolean shouldSendPunch(String punchStatus) {
-        String status = punchStatus == null ? "" : punchStatus.trim().toLowerCase();
-        return "ready".equals(status)
-                || "probing".equals(status)
-                || "client_probe_sent".equals(status);
-    }
-
-    private static Optional<String> findFirst(Pattern pattern, String text) {
-        Matcher matcher = pattern.matcher(text);
-        if (!matcher.find()) {
-            return Optional.empty();
-        }
-        return Optional.ofNullable(matcher.group(1));
-    }
-
-    private static void logState(String roomName, QuicRouteState state, String detail) {
+    static void logState(String roomName, QuicRouteState state, String detail) {
         NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] QUIC route state={}, room_name='{}', detail='{}'",
                 state,

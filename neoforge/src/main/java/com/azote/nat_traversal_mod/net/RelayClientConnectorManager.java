@@ -1,7 +1,8 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -22,22 +23,24 @@ public final class RelayClientConnectorManager {
             return true;
         }
 
-        if (!Config.relayClientConnectorEnabled()) {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+
+        if (!runtimeConfig.relayClientConnectorEnabled()) {
             return false;
         }
 
-        String token = Config.relayToken();
+        String token = runtimeConfig.relayToken();
         if (token.isBlank()) {
             NatTraversalMod.LOGGER.warn("[nat-traversal-mod] relay_token is empty. Relay client connector disabled.");
             return false;
         }
 
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpointForClient(), "relay_connect_endpoint_client");
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(runtimeConfig.relayConnectEndpointClient(), "relay.connect_endpoint");
         if (endpoint.isEmpty()) {
             return false;
         }
 
-        int localPort = Config.relayClientLocalPort();
+        int localPort = runtimeConfig.relayClientLocalPort();
         Thread thread = new Thread(() -> runLoop(localPort), "nat-relay-client-connector");
         thread.setDaemon(true);
         thread.start();
@@ -62,8 +65,9 @@ public final class RelayClientConnectorManager {
     }
 
     private static void handleLocalConnection(Socket localSocket) {
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(Config.relayConnectEndpointForClient(), "relay_connect_endpoint_client");
-        String token = Config.relayToken();
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(runtimeConfig.relayConnectEndpointClient(), "relay.connect_endpoint");
+        String token = runtimeConfig.relayToken();
         if (endpoint.isEmpty() || token.isBlank()) {
             RelayIoBridge.closeQuietly(localSocket);
             return;

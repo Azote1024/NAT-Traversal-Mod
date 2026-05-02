@@ -1,7 +1,9 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.QuicTlsMode;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -47,28 +49,28 @@ final class NettyQuicTransport implements QuicTransport {
 
     @Override
     public Optional<ResolvedTarget> tryActivate(RelayEndpoint endpoint, String roomName) {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         if (!testConnectivity(endpoint)) {
             return Optional.empty();
         }
 
         currentEndpoint = endpoint;
         if (!localTunnelStarted) {
-            startLocalTunnel();
+            startLocalTunnel(runtimeConfig.quicClientLocalPort());
         }
 
         if (!localTunnelStarted) {
             return Optional.empty();
         }
 
-        return Optional.of(new ResolvedTarget("127.0.0.1", Config.quicClientLocalPort()));
+        return Optional.of(new ResolvedTarget("127.0.0.1", runtimeConfig.quicClientLocalPort()));
     }
 
-    private synchronized void startLocalTunnel() {
+    private synchronized void startLocalTunnel(int localPort) {
         if (localTunnelStarted) {
             return;
         }
 
-        int localPort = Config.quicClientLocalPort();
         Thread thread = new Thread(() -> runLocalTunnelLoop(localPort), "nat-quic-client-tunnel");
         thread.setDaemon(true);
         thread.start();
@@ -117,14 +119,15 @@ final class NettyQuicTransport implements QuicTransport {
     }
 
     private QuicStreamChannel openQuicStream(RelayEndpoint endpoint) {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         QuicSslContextBuilder sslContextBuilder = QuicSslContextBuilder.forClient()
                 .applicationProtocols("minecraft");
 
-        if ("insecure_trust_all".equals(Config.quicTlsMode())) {
+        if (runtimeConfig.quicTlsMode() == QuicTlsMode.INSECURE_TRUST_ALL) {
             sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
             NatTraversalMod.LOGGER.warn("[nat-traversal-mod] QUIC TLS mode uses insecure trust-all. room route security is reduced.");
         } else {
-            X509TrustManager trustManager = createCaOrPinnedTrustManager(Config.quicCertFingerprintSha256());
+            X509TrustManager trustManager = createCaOrPinnedTrustManager(runtimeConfig.quicCertFingerprintSha256());
             sslContextBuilder.trustManager(trustManager);
         }
 

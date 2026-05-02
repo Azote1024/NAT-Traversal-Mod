@@ -1,4 +1,4 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.supabase;
 
 final class SupabaseJsonUtil {
     private SupabaseJsonUtil() {

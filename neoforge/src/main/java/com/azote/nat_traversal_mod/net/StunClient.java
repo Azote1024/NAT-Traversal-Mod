@@ -28,7 +28,7 @@ public final class StunClient {
     public static Optional<String> resolvePublicEndpoint(String stunServer, int timeoutMs) {
         ServerSpec serverSpec = parseServerSpec(stunServer);
         if (serverSpec == null) {
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Invalid stun_server='{}'.", stunServer);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Invalid stun.server='{}'.", stunServer);
             return Optional.empty();
         }
 
@@ -50,11 +50,11 @@ public final class StunClient {
             return parseBindingResponse(buffer, responsePacket.getLength(), txId);
         } catch (IOException exception) {
             if (isUnresolvedAddress(exception)) {
-                NatTraversalMod.LOGGER.warn("[nat-traversal-mod] STUN request failed: unresolved address. stun_server='{}'", stunServer);
+                NatTraversalMod.LOGGER.warn("[nat-traversal-mod] STUN request failed: unresolved address. stun.server='{}'", stunServer);
                 return Optional.empty();
             }
 
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] STUN request failed. stun_server='{}'", stunServer, exception);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] STUN request failed. stun.server='{}'", stunServer, exception);
             return Optional.empty();
         }
     }

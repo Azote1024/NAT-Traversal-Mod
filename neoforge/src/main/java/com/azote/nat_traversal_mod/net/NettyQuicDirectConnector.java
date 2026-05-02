@@ -1,7 +1,9 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.QuicTlsMode;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -39,13 +41,14 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
 
     @Override
     public Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection, String attemptId) {
-        String roomName = Config.roomName();
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        String roomName = runtimeConfig.roomName();
         String normalizedAttemptId = attemptId == null ? "" : attemptId;
         boolean useNativeEpoll = Epoll.isAvailable() && useEpoll;
         EventLoopGroup ioGroup = useNativeEpoll ? Connection.NETWORK_EPOLL_WORKER_GROUP.get() : Connection.NETWORK_WORKER_GROUP.get();
 
         QuicSslContextBuilder sslBuilder = QuicSslContextBuilder.forClient().applicationProtocols("minecraft");
-        applyClientTlsMode(sslBuilder);
+        applyClientTlsMode(runtimeConfig, sslBuilder);
 
         var codec = new QuicClientCodecBuilder()
                 .sslContext(sslBuilder.build())
@@ -64,13 +67,15 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 .channel();
 
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] quic_direct phase=dial_start room_name='{}' attempt_id='{}' target='{}:{}' epoll={} tls_mode='{}'",
+                "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_DIAL_START
+                        + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
+                        + QuicLogSchema.FIELD_TARGET + "='{}:{}' epoll={} tls_mode='{}'",
                 roomName,
                 normalizedAttemptId,
                 address.getHostString(),
                 address.getPort(),
                 useNativeEpoll,
-                Config.quicTlsMode()
+                toDisplayTlsMode(runtimeConfig.quicTlsMode())
         );
 
         sendPreConnectPunch(udpChannel, address, roomName, normalizedAttemptId);
@@ -81,12 +86,16 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 .connect();
 
         if (!quicConnectFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !quicConnectFuture.isSuccess()) {
+            String errorCode = QuicErrorCodes.classifyDirectConnectError(quicConnectFuture.cause());
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_direct phase=channel_connect_failed room_name='{}' attempt_id='{}' target='{}:{}'",
+                    "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_CHANNEL_CONNECT_FAILED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
+                            + QuicLogSchema.FIELD_TARGET + "='{}:{}' " + QuicLogSchema.FIELD_ERROR_CODE + "='{}'",
                     roomName,
                     normalizedAttemptId,
                     address.getHostString(),
                     address.getPort(),
+                    errorCode,
                     quicConnectFuture.cause()
             );
             udpChannel.close().syncUninterruptibly();
@@ -109,12 +118,16 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         });
 
         if (!streamFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !streamFuture.isSuccess()) {
+            String errorCode = QuicErrorCodes.classifyDirectStreamError(streamFuture.cause());
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_direct phase=stream_create_failed room_name='{}' attempt_id='{}' target='{}:{}'",
+                    "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_STREAM_CREATE_FAILED
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
+                            + QuicLogSchema.FIELD_TARGET + "='{}:{}' " + QuicLogSchema.FIELD_ERROR_CODE + "='{}'",
                     roomName,
                     normalizedAttemptId,
                     address.getHostString(),
                     address.getPort(),
+                    errorCode,
                     streamFuture.cause()
             );
             quicChannel.close().syncUninterruptibly();
@@ -131,7 +144,9 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         }
 
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] quic_direct phase=stream_ready room_name='{}' attempt_id='{}' target='{}:{}'",
+                "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_STREAM_READY
+                        + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
+                        + QuicLogSchema.FIELD_TARGET + "='{}:{}'",
                 roomName,
                 normalizedAttemptId,
                 address.getHostString(),
@@ -142,7 +157,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
     }
 
     private static void sendPreConnectPunch(io.netty.channel.Channel udpChannel, InetSocketAddress address, String roomName, String attemptId) {
-        String payload = "NAT-PUNCH " + Config.roomName() + " " + attemptId + " preconnect";
+        String payload = "NAT-PUNCH " + roomName + " " + attemptId + " preconnect";
         byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
         for (int i = 0; i < 3; i++) {
             DatagramPacket packet = new DatagramPacket(Unpooled.wrappedBuffer(bytes), address);
@@ -150,7 +165,9 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         }
 
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] quic_direct phase=pre_punch_sent room_name='{}' attempt_id='{}' target='{}:{}' count=3",
+                "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_PRE_PUNCH_SENT
+                        + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
+                        + QuicLogSchema.FIELD_TARGET + "='{}:{}' count=3",
                 roomName,
                 attemptId,
                 address.getHostString(),
@@ -158,17 +175,20 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         );
     }
 
-    private static void applyClientTlsMode(QuicSslContextBuilder sslBuilder) {
-        String mode = Config.quicTlsMode();
-        if ("insecure_trust_all".equals(mode)) {
+    private static void applyClientTlsMode(RuntimeConfigSnapshot runtimeConfig, QuicSslContextBuilder sslBuilder) {
+        if (runtimeConfig.quicTlsMode() == QuicTlsMode.INSECURE_TRUST_ALL) {
             sslBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
             return;
         }
 
-        String fingerprint = Config.quicCertFingerprintSha256();
+        String fingerprint = runtimeConfig.quicCertFingerprintSha256();
         if (!fingerprint.isBlank()) {
             sslBuilder.trustManager(new FingerprintTrustManagerFactory(fingerprint));
         }
+    }
+
+    private static String toDisplayTlsMode(QuicTlsMode mode) {
+        return mode == QuicTlsMode.INSECURE_TRUST_ALL ? "insecure_trust_all" : "ca_or_pinned";
     }
 }
 

@@ -1,6 +1,6 @@
 package com.azote.nat_traversal_mod;
 
-import com.azote.nat_traversal_mod.net.SupabaseRoomsPublisher;
+import com.azote.nat_traversal_mod.net.supabase.SupabaseRoomsPublisher;
 import com.azote.nat_traversal_mod.net.RelayHostConnector;
 import com.azote.nat_traversal_mod.net.QuicServerTunnel;
 import com.azote.nat_traversal_mod.net.QuicServerTunnelFactory;

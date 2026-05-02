@@ -1,14 +1,12 @@
 package com.azote.nat_traversal_mod.mixin;
 
-import com.azote.nat_traversal_mod.Config;
+import com.azote.nat_traversal_mod.net.ConnectFallbackPolicy;
 import com.azote.nat_traversal_mod.NatTraversalMod;
 import com.azote.nat_traversal_mod.net.QuicDirectConnectorFactory;
-import com.azote.nat_traversal_mod.net.QuicDirectRouteContext;
-import com.azote.nat_traversal_mod.net.RelayClientConnectorManager;
+import com.azote.nat_traversal_mod.net.routing.QuicDirectRouteContext;
 import io.netty.channel.ChannelFuture;
 import net.minecraft.network.Connection;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -53,53 +51,28 @@ public class ConnectionQuicConnectMixin {
         }
 
         NatTraversalMod.LOGGER.info("[nat-traversal-mod] Direct QUIC connect failed. try relay fallback first.");
-        if (natTraversalMod$tryRelayFallback(useEpoll, connection, cir)) {
+        ConnectFallbackPolicy.Decision fallbackDecision = ConnectFallbackPolicy.decide(pendingRoute.get());
+        if (fallbackDecision.route() == ConnectFallbackPolicy.Route.RELAY) {
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] QUIC fallback route selected: relay connector target='{}:{}'",
+                    fallbackDecision.target().getHostString(),
+                    fallbackDecision.target().getPort()
+            );
+            cir.setReturnValue(Connection.connect(fallbackDecision.target(), useEpoll, connection));
             return;
         }
 
-        Optional<InetSocketAddress> fallbackTarget = natTraversalMod$resolveTcpFallbackTarget(pendingRoute.get());
-        if (fallbackTarget.isPresent()) {
+        if (fallbackDecision.route() == ConnectFallbackPolicy.Route.ORIGINAL_TCP) {
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC direct failed. fallback to original TCP target='{}:{}'",
-                    fallbackTarget.get().getHostString(),
-                    fallbackTarget.get().getPort()
+                    fallbackDecision.target().getHostString(),
+                    fallbackDecision.target().getPort()
             );
-            cir.setReturnValue(Connection.connect(fallbackTarget.get(), useEpoll, connection));
+            cir.setReturnValue(Connection.connect(fallbackDecision.target(), useEpoll, connection));
             return;
         }
 
-        NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay fallback unavailable. fallback to TCP connect path.");
-    }
-
-    @Unique
-    private static Optional<InetSocketAddress> natTraversalMod$resolveTcpFallbackTarget(QuicDirectRouteContext.PendingRoute pendingRoute) {
-        InetSocketAddress fallbackTarget = pendingRoute.fallbackTarget();
-        if (fallbackTarget == null) {
-            return Optional.empty();
-        }
-        if (fallbackTarget.getPort() < 1 || fallbackTarget.getPort() > 65535) {
-            return Optional.empty();
-        }
-        return Optional.of(fallbackTarget);
-    }
-
-    @Unique
-    private static boolean natTraversalMod$tryRelayFallback(boolean useEpoll, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
-        if (!RelayClientConnectorManager.ensureStarted()) {
-            NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay fallback is unavailable: local relay client connector is not ready.");
-            return false;
-        }
-
-        int relayPort = Config.relayClientLocalPort();
-        InetSocketAddress relayTarget = new InetSocketAddress("127.0.0.1", relayPort);
-        NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] QUIC fallback route selected: relay connector target='{}:{}'",
-                relayTarget.getHostString(),
-                relayTarget.getPort()
-        );
-
-        cir.setReturnValue(Connection.connect(relayTarget, useEpoll, connection));
-        return true;
+        NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay/TCP fallback unavailable. fallback to TCP connect path.");
     }
 }
 

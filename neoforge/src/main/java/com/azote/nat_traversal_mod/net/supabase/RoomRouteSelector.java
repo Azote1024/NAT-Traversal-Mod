@@ -1,7 +1,10 @@
-package com.azote.nat_traversal_mod.net;
+package com.azote.nat_traversal_mod.net.supabase;
 
-import com.azote.nat_traversal_mod.Config;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.net.RelayClientConnectorManager;
+import com.azote.nat_traversal_mod.net.RelayEndpoint;
+import com.azote.nat_traversal_mod.net.ResolvedTarget;
 
 import java.util.Optional;
 
@@ -9,8 +12,12 @@ final class RoomRouteSelector {
     private RoomRouteSelector() {
     }
 
-    static Optional<ResolvedTarget> tryRelayEndpoint(RoomSnapshotParser.RoomSnapshot snapshot, String roomName) {
-        if (!Config.relayClientConnectorEnabled()) {
+    static Optional<ResolvedTarget> tryRelayEndpoint(
+            RoomSnapshotParser.RoomSnapshot snapshot,
+            String roomName,
+            RuntimeConfigSnapshot runtimeConfig
+    ) {
+        if (!runtimeConfig.relayClientConnectorEnabled()) {
             return Optional.empty();
         }
 
@@ -56,7 +63,7 @@ final class RoomRouteSelector {
             return Optional.empty();
         }
 
-        int localRelayPort = Config.relayClientLocalPort();
+        int localRelayPort = runtimeConfig.relayClientLocalPort();
         NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] Use local relay client connector. room_name='{}', relay_endpoint='{}', target='127.0.0.1:{}'",
                 roomName,
@@ -66,10 +73,14 @@ final class RoomRouteSelector {
         return Optional.of(new ResolvedTarget("127.0.0.1", localRelayPort));
     }
 
-    static Optional<ResolvedTarget> tryPublicEndpoint(RoomSnapshotParser.RoomSnapshot snapshot, String roomName) {
+    static Optional<ResolvedTarget> tryPublicEndpoint(
+            RoomSnapshotParser.RoomSnapshot snapshot,
+            String roomName,
+            RuntimeConfigSnapshot runtimeConfig
+    ) {
         Optional<String> publicEndpoint = snapshot.publicEndpoint();
         if (publicEndpoint.isEmpty()) {
-            if (Config.stunEnabled()) {
+            if (runtimeConfig.stunEnabled()) {
                 NatTraversalMod.LOGGER.info(
                         "[nat-traversal-mod] public_endpoint key is missing in room payload. room_name='{}'.",
                         roomName
@@ -79,7 +90,7 @@ final class RoomRouteSelector {
         }
 
         if (publicEndpoint.get().isEmpty()) {
-            if (Config.stunEnabled()) {
+            if (runtimeConfig.stunEnabled()) {
                 NatTraversalMod.LOGGER.info(
                         "[nat-traversal-mod] public_endpoint is empty. room_name='{}'.",
                         roomName
