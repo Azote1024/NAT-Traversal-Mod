@@ -64,10 +64,89 @@ neoForge {
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
-def quicClassesJar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-classes-quic-0.0.73.Final-SNAPSHOT.jar")
-def quicNativeWinJar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-windows-x86_64.jar")
-def quicNativeLinuxX64Jar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-x86_64.jar")
-def quicNativeLinuxArm64Jar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-aarch_64.jar")
+def quicProtocolSupportRepoUrl = (
+        project.findProperty("quicProtocolSupportRepoUrl")?.toString()
+                ?: System.getenv("QUIC_PROTOCOL_SUPPORT_REPO_URL")
+                ?: "https://codeberg.org/tesinormed/QuicProtocolSupport.git"
+)
+
+def quicJarNames = [
+        "netty-incubator-codec-classes-quic-0.0.73.Final-SNAPSHOT.jar",
+        "netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-windows-x86_64.jar",
+        "netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-x86_64.jar",
+        "netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-aarch_64.jar"
+]
+
+def quicRefLibDir = file("../ref/quicprotocolsupport/libs")
+def quicBootstrapRepoDir = file("$buildDir/quicprotocolsupport-src")
+def quicBootstrapLibDir = file("$buildDir/quicprotocolsupport-bootstrap/libs")
+
+def resolveQuicJarFile = { String jarName ->
+    File refJar = file("../ref/quicprotocolsupport/libs/${jarName}")
+    if (refJar.exists()) {
+        return refJar
+    }
+    return file("$buildDir/quicprotocolsupport-bootstrap/libs/${jarName}")
+}
+
+def prepareQuicRuntimeLibs = tasks.register("prepareQuicRuntimeLibs") {
+    group = "build setup"
+    description = "Ensures QUIC runtime jars are available from ../ref or bootstraps from QuicProtocolSupport repository."
+    outputs.files(quicJarNames.collect { file("$buildDir/quicprotocolsupport-bootstrap/libs/${it}") })
+
+    doLast {
+        List<String> missingInRef = quicJarNames.findAll { !new File(quicRefLibDir, it).exists() }
+        if (missingInRef.isEmpty()) {
+            return
+        }
+
+        if (!quicBootstrapRepoDir.exists()) {
+            try {
+                exec {
+                    commandLine "git", "--version"
+                }
+            } catch (Exception exception) {
+                throw new GradleException(
+                        "QUIC libs are missing in ${quicRefLibDir}. Git is required to bootstrap them. " +
+                                "Install Git or provide jars under ../ref/quicprotocolsupport/libs.",
+                        exception
+                )
+            }
+
+            logger.lifecycle("[nat-traversal-mod] Bootstrapping QUIC libs: cloning {}", quicProtocolSupportRepoUrl)
+            exec {
+                commandLine "git", "clone", "--depth", "1", quicProtocolSupportRepoUrl, quicBootstrapRepoDir.absolutePath
+            }
+        }
+
+        File clonedLibDir = new File(quicBootstrapRepoDir, "libs")
+        if (!clonedLibDir.isDirectory()) {
+            throw new GradleException("Bootstrap source does not contain libs directory: ${clonedLibDir}")
+        }
+
+        quicBootstrapLibDir.mkdirs()
+        missingInRef.each { String jarName ->
+            File sourceJar = new File(clonedLibDir, jarName)
+            if (!sourceJar.exists()) {
+                throw new GradleException("Missing required QUIC jar in cloned repository: ${sourceJar}")
+            }
+            copy {
+                from sourceJar
+                into quicBootstrapLibDir
+            }
+        }
+
+        List<String> stillMissing = quicJarNames.findAll { !resolveQuicJarFile(it).exists() }
+        if (!stillMissing.isEmpty()) {
+            throw new GradleException("QUIC runtime jars are still missing after bootstrap: ${stillMissing}")
+        }
+    }
+}
+
+def quicClassesJar = resolveQuicJarFile("netty-incubator-codec-classes-quic-0.0.73.Final-SNAPSHOT.jar")
+def quicNativeWinJar = resolveQuicJarFile("netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-windows-x86_64.jar")
+def quicNativeLinuxX64Jar = resolveQuicJarFile("netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-x86_64.jar")
+def quicNativeLinuxArm64Jar = resolveQuicJarFile("netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-aarch_64.jar")
 
 
 dependencies {
@@ -79,8 +158,13 @@ dependencies {
 }
 
 tasks.withType(JavaExec).configureEach {
+    dependsOn prepareQuicRuntimeLibs
     // NeoForge run tasks don't always inherit file() dependencies reliably; force QUIC jars into launch classpaths.
     classpath += files(quicClassesJar, quicNativeWinJar, quicNativeLinuxX64Jar, quicNativeLinuxArm64Jar)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    dependsOn prepareQuicRuntimeLibs
 }
 
 def quicRuntimeJarPaths = [quicClassesJar, quicNativeWinJar, quicNativeLinuxX64Jar, quicNativeLinuxArm64Jar]
@@ -144,6 +228,7 @@ def patchModDevLog4j = { String path ->
 }
 
 tasks.matching { it.name == "writeClientLegacyClasspath" }.configureEach {
+    dependsOn prepareQuicRuntimeLibs
     doLast {
         File legacyClasspathFile = new File(clientLegacyClasspathPath)
         if (!legacyClasspathFile.exists()) {
@@ -163,6 +248,7 @@ tasks.matching { it.name == "writeClientLegacyClasspath" }.configureEach {
 }
 
 tasks.matching { it.name == "writeServerLegacyClasspath" }.configureEach {
+    dependsOn prepareQuicRuntimeLibs
     doLast {
         File legacyClasspathFile = new File(serverLegacyClasspathPath)
         if (!legacyClasspathFile.exists()) {

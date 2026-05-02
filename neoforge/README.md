@@ -11,6 +11,23 @@ For full stack setup, see:
 
 - Java 21
 - Gradle wrapper (`gradlew.bat`)
+- Git (only needed when `../ref/quicprotocolsupport/libs` is missing)
+
+## First Clone Bootstrap
+
+- If QUIC jars do not exist under `../ref/quicprotocolsupport/libs`, Gradle will auto-bootstrap them by cloning:
+  - `https://codeberg.org/tesinormed/QuicProtocolSupport.git`
+- Run this once after clone:
+
+```powershell
+Set-Location "<repo-root>"
+Set-Location ".\neoforge"
+.\gradlew.bat --no-daemon compileJava
+```
+
+- Optional overrides:
+  - custom repo URL: `-PquicProtocolSupportRepoUrl=<git-url>`
+  - verbose QUIC transport logs: `-PnatQuicVerboseLogs=true`
 
 ## Build
 

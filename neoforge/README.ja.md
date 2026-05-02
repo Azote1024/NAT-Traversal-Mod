@@ -11,6 +11,23 @@ NeoForge mod プロジェクト単体のビルド/実行ガイドです。
 
 - Java 21
 - Gradle Wrapper（`gradlew.bat`）
+- Git（`../ref/quicprotocolsupport/libs` が無い場合のみ必要）
+
+## クローン直後の初期化
+
+- `../ref/quicprotocolsupport/libs` に QUIC jar が無い場合、Gradle が以下を clone して自動補完します。
+  - `https://codeberg.org/tesinormed/QuicProtocolSupport.git`
+- クローン直後は次を1回実行してください。
+
+```powershell
+Set-Location "<repo-root>"
+Set-Location ".\neoforge"
+.\gradlew.bat --no-daemon compileJava
+```
+
+- 任意オプション:
+  - clone URL 上書き: `-PquicProtocolSupportRepoUrl=<git-url>`
+  - QUIC詳細ログを有効化: `-PnatQuicVerboseLogs=true`
 
 ## ビルド
 
