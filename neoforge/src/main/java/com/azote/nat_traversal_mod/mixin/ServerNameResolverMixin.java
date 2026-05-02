@@ -46,14 +46,26 @@ public class ServerNameResolverMixin {
         );
 
         if (Config.tcpQuicRelayMode()) {
-            Optional<RouteAttemptPlanner.Decision> stagedDecision = natTraversalMod$planConnectorDecision();
+            Optional<RouteAttemptPlanner.PlanResult> stagedDecision = natTraversalMod$planConnectorDecision();
             if (stagedDecision.isPresent()) {
-                RouteAttemptPlanner.Decision decision = stagedDecision.get();
+                RouteAttemptPlanner.PlanResult plan = stagedDecision.get();
+                RouteAttemptPlanner.Decision decision = plan.decision();
+                Nat_traversal_mod.LOGGER.info(
+                        "[nat-traversal-mod] tcp_quic_relay planner room_name='{}' decision='{}' tcp_used={}/{} quic_used={}/{}",
+                        Config.roomName(),
+                        decision,
+                        plan.tcpAttemptsUsed(),
+                        plan.tcpMaxAttempts(),
+                        plan.quicAttemptsUsed(),
+                        plan.quicMaxAttempts()
+                );
                 if (decision == RouteAttemptPlanner.Decision.TCP_DIRECT) {
                     Nat_traversal_mod.LOGGER.info(
-                            "[nat-traversal-mod] tcp_quic_relay stage=tcp_direct. keep original target='{}:{}'",
+                            "[nat-traversal-mod] tcp_quic_relay stage=tcp_direct. keep original target='{}:{}' (tcp_used={}/{})",
                             requestedHost,
-                            requestedPort
+                            requestedPort,
+                            plan.tcpAttemptsUsed(),
+                            plan.tcpMaxAttempts()
                     );
                     return;
                 }
@@ -62,9 +74,13 @@ public class ServerNameResolverMixin {
                         int relayPort = Config.relayClientLocalPort();
                         InetSocketAddress relayTarget = new InetSocketAddress("127.0.0.1", relayPort);
                         Nat_traversal_mod.LOGGER.info(
-                                "[nat-traversal-mod] tcp_quic_relay stage=relay. route='{}:{}'",
+                                "[nat-traversal-mod] tcp_quic_relay stage=relay. route='{}:{}' (tcp_used={}/{} quic_used={}/{})",
                                 relayTarget.getHostString(),
-                                relayTarget.getPort()
+                                relayTarget.getPort(),
+                                plan.tcpAttemptsUsed(),
+                                plan.tcpMaxAttempts(),
+                                plan.quicAttemptsUsed(),
+                                plan.quicMaxAttempts()
                         );
                         cir.setReturnValue(Optional.of(ResolvedServerAddress.from(relayTarget)));
                         return;
@@ -74,7 +90,11 @@ public class ServerNameResolverMixin {
                     );
                     return;
                 }
-                Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] tcp_quic_relay stage=quic_direct.");
+                Nat_traversal_mod.LOGGER.info(
+                        "[nat-traversal-mod] tcp_quic_relay stage=quic_direct. (quic_used={}/{})",
+                        plan.quicAttemptsUsed(),
+                        plan.quicMaxAttempts()
+                );
             }
         }
 
@@ -112,11 +132,11 @@ public class ServerNameResolverMixin {
     }
 
     @Unique
-    private static Optional<RouteAttemptPlanner.Decision> natTraversalMod$planConnectorDecision() {
+    private static Optional<RouteAttemptPlanner.PlanResult> natTraversalMod$planConnectorDecision() {
         if (!Thread.currentThread().getName().startsWith("Server Connector")) {
             return Optional.empty();
         }
-        RouteAttemptPlanner.Decision decision = RouteAttemptPlanner.planForConnector(
+        RouteAttemptPlanner.PlanResult decision = RouteAttemptPlanner.planForConnectorDetailed(
                 Config.roomName(),
                 Config.tcpAttempts(),
                 Config.quicAttempts(),

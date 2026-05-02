@@ -31,7 +31,6 @@ public final class QuicP2pManager {
     private static final Pattern PUNCH_ENDPOINT_PATTERN = Pattern.compile("\"punch_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_STATUS_PATTERN = Pattern.compile("\"punch_status\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_TOKEN_PATTERN = Pattern.compile("\"punch_token\"\\s*:\\s*\"([^\"]*)\"");
-    private static final Pattern HOST_NAT_TYPE_PATTERN = Pattern.compile("\"host_nat_type\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern RELAY_ENDPOINT_PATTERN = Pattern.compile("\"relay_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final QuicTransport TRANSPORT = createTransport();
     private static final String CLIENT_KEY = UUID.randomUUID().toString();
@@ -106,12 +105,6 @@ public final class QuicP2pManager {
     public static Optional<ResolvedTarget> tryResolveFromSessionBody(String body, String roomName) {
         if (!Config.quicEnabled()) {
             logState(roomName, QuicRouteState.DISABLED, "quic_enabled=false");
-            return Optional.empty();
-        }
-
-        String hostNatType = findFirst(HOST_NAT_TYPE_PATTERN, body).map(String::trim).orElse("");
-        if ("symmetric".equalsIgnoreCase(hostNatType)) {
-            logState(roomName, QuicRouteState.NOT_READY, "quic_sessions.host_nat_type=symmetric");
             return Optional.empty();
         }
 

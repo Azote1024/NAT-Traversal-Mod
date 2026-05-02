@@ -94,8 +94,8 @@ public class Config {
             .defineInRange("relay_client_local_port", 26667, 1, 65535);
 
     private static final ModConfigSpec.ConfigValue<String> RELAY_PRIORITY_MODE_VALUE = CLIENT_BUILDER
-            .comment("Route priority mode: public_first, relay_first, quic_first, or tcp_quic_relay")
-            .define("relay_priority_mode", "public_first");
+            .comment("Route priority mode: tcp_quic_relay(default), quic_first, relay_first, or public_first")
+            .define("relay_priority_mode", "tcp_quic_relay");
 
     private static final ModConfigSpec.IntValue TCP_ATTEMPTS_VALUE = CLIENT_BUILDER
             .comment("Number of direct TCP attempts before entering QUIC stage in tcp_quic_relay mode")

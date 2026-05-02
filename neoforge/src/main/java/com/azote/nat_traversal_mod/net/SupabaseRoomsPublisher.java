@@ -177,7 +177,7 @@ public final class SupabaseRoomsPublisher {
     }
 
     private static String appendNatRoutingFields(NatClassification natClassification, String updatedAt) {
-        String routeHint = "symmetric".equals(natClassification.hostNatType()) ? "relay_required" : "quic_preferred";
+        String routeHint = "";
         return ","
                 + "\"host_nat_type\":\"" + jsonEscape(natClassification.hostNatType()) + "\","
                 + "\"nat_confidence\":\"" + jsonEscape(natClassification.natConfidence()) + "\","
@@ -246,9 +246,8 @@ public final class SupabaseRoomsPublisher {
         String endpoint = config.supabaseUrl + "/rest/v1/quic_sessions";
         String defaultPunchEndpoint = config.hostIp + ":" + hostPort;
         String punchToken = buildPunchToken(config.roomName, updatedAt);
-        boolean relayForced = "symmetric".equals(natClassification.hostNatType());
-        String routeDecision = relayForced ? "relay_forced" : "quic_try";
-        String relayReason = relayForced ? "host_symmetric_nat" : "";
+        String routeDecision = "quic_try";
+        String relayReason = "";
         String body = "{"
                 + "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," 
                 + "\"quic_endpoint\":\"" + jsonEscape(config.quicEndpoint) + "\"," 
@@ -335,7 +334,7 @@ public final class SupabaseRoomsPublisher {
     private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {
         String directEndpoint = config.hostIp + ":" + hostPort;
         if (!Config.stunEnabled()) {
-            return new NatClassification("unknown", "disabled", "direct", directEndpoint);
+            return new NatClassification("unknown", "", "direct", directEndpoint);
         }
 
         Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs());
@@ -350,17 +349,16 @@ public final class SupabaseRoomsPublisher {
                     "direct",
                     publicEndpoint
             );
-            return new NatClassification("unknown", "low", "direct", publicEndpoint);
+            return new NatClassification("unknown", "", "direct", publicEndpoint);
         }
 
         String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
-        String hostNatType = publicEndpoint.equals(directEndpoint) ? "open" : "port_restricted";
         Nat_traversal_mod.LOGGER.info(
                 "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",
                 natMethod,
                 publicEndpoint
         );
-        return new NatClassification(hostNatType, "medium", natMethod, publicEndpoint);
+        return new NatClassification("unknown", "", natMethod, publicEndpoint);
     }
 
     private record NatClassification(String hostNatType, String natConfidence, String natMethod, String publicEndpoint) {
