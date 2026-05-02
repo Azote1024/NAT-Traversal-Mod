@@ -3,6 +3,7 @@ package com.azote.nat_traversal_mod.mixin;
 import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import com.azote.nat_traversal_mod.net.ConnectionTargetResolver;
+import com.azote.nat_traversal_mod.net.QuicDirectRouteContext;
 import com.azote.nat_traversal_mod.net.ResolvedTarget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
@@ -22,13 +23,16 @@ import java.util.Optional;
 public class ServerNameResolverMixin {
     @Inject(method = "resolveAddress", at = @At("HEAD"), cancellable = true)
     private void natTraversalMod$resolveAddress(ServerAddress address, CallbackInfoReturnable<Optional<ResolvedServerAddress>> cir) {
-        String interceptHost = Config.interceptHost();
-        if (interceptHost.isBlank()) {
+        QuicDirectRouteContext.clear();
+
+        String interceptRule = Config.interceptHost();
+        if (interceptRule.isBlank()) {
             return;
         }
 
         String requestedHost = address.getHost();
-        if (!interceptHost.equals(requestedHost)) {
+        int requestedPort = address.getPort();
+        if (!natTraversalMod$matchesIntercept(interceptRule, requestedHost, requestedPort)) {
             return;
         }
 
@@ -59,6 +63,33 @@ public class ServerNameResolverMixin {
 
         natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + target.hostIp() + ":" + target.hostPort());
         cir.setReturnValue(Optional.of(resolvedAddress));
+    }
+
+    @Unique
+    private static boolean natTraversalMod$matchesIntercept(String interceptRule, String requestedHost, int requestedPort) {
+        String ruleHost = interceptRule;
+        int rulePort = -1;
+
+        int splitIndex = interceptRule.lastIndexOf(':');
+        if (splitIndex > 0 && splitIndex < interceptRule.length() - 1) {
+            String maybePort = interceptRule.substring(splitIndex + 1).trim();
+            if (maybePort.chars().allMatch(Character::isDigit)) {
+                try {
+                    int parsedPort = Integer.parseInt(maybePort);
+                    if (parsedPort >= 1 && parsedPort <= 65535) {
+                        ruleHost = interceptRule.substring(0, splitIndex).trim();
+                        rulePort = parsedPort;
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+
+        if (!ruleHost.equals(requestedHost)) {
+            return false;
+        }
+
+        return rulePort == -1 || rulePort == requestedPort;
     }
 
     @Unique

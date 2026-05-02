@@ -17,6 +17,9 @@ For full stack setup, see:
 
 - `migrations/20260430165635_remote_schema.sql`
   - v1.0.0 baseline `public.rooms` table including STUN/relay columns
+- `migrations/20260502090000_quic_sessions.sql`
+  - dedicated `public.quic_sessions` table for QUIC signaling
+  - includes minimal one-shot hole punching fields (`punch_status`, `punch_token`, `client_punch_sent_at`)
 
 ## Option A: Cloud Supabase
 

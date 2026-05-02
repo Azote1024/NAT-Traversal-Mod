@@ -50,6 +50,7 @@ public final class SupabaseRoomsPublisher {
                     config.hostIp,
                     hostPort
             );
+            publishQuicSession(config, hostPort, updatedAt);
             return;
         }
 
@@ -90,6 +91,7 @@ public final class SupabaseRoomsPublisher {
 
         if (result.success) {
             Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Room closed. room_name='{}'", config.roomName);
+            closeQuicSession(config, updatedAt);
             return;
         }
 
@@ -252,6 +254,66 @@ public final class SupabaseRoomsPublisher {
         return singleLine.substring(0, 200) + "...";
     }
 
+    private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt) {
+        String endpoint = config.supabaseUrl + "/rest/v1/quic_sessions";
+        String defaultPunchEndpoint = config.hostIp + ":" + hostPort;
+        String punchToken = buildPunchToken(config.roomName, updatedAt);
+        String body = "{"
+                + "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," 
+                + "\"quic_endpoint\":\"" + jsonEscape(config.quicEndpoint) + "\"," 
+                + "\"quic_status\":\"" + jsonEscape(config.quicStatus) + "\"," 
+                + "\"punch_endpoint\":\"" + jsonEscape(defaultPunchEndpoint) + "\"," 
+                + "\"punch_status\":\"ready\","
+                + "\"punch_token\":\"" + jsonEscape(punchToken) + "\","
+                + "\"status\":\"open\","
+                + "\"updated_at\":\"" + jsonEscape(updatedAt) + "\""
+                + "}";
+
+        RequestResult result = sendJsonRequest(
+                endpoint,
+                "POST",
+                body,
+                config.supabaseKey,
+                "resolution=merge-duplicates,return=minimal"
+        );
+
+        if (!result.success) {
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] quic_sessions publish failed. status={}, room_name='{}'.",
+                    result.statusCode,
+                    config.roomName
+            );
+        }
+    }
+
+    private static void closeQuicSession(PublishConfig config, String updatedAt) {
+        String encodedRoomName = URLEncoder.encode(config.roomName, StandardCharsets.UTF_8);
+        String endpoint = config.supabaseUrl + "/rest/v1/quic_sessions?room_name=eq." + encodedRoomName;
+        String body = "{"
+                + "\"status\":\"closed\"," 
+                + "\"quic_status\":\"down\"," 
+                + "\"punch_status\":\"idle\","
+                + "\"punch_token\":\"\","
+                + "\"updated_at\":\"" + jsonEscape(updatedAt) + "\""
+                + "}";
+
+        RequestResult result = sendJsonRequest(
+                endpoint,
+                "PATCH",
+                body,
+                config.supabaseKey,
+                "return=minimal"
+        );
+
+        if (!result.success) {
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] quic_sessions close failed. status={}, room_name='{}'.",
+                    result.statusCode,
+                    config.roomName
+            );
+        }
+    }
+
     private record PublishConfig(
             String supabaseUrl,
             String supabaseKey,
@@ -267,5 +329,9 @@ public final class SupabaseRoomsPublisher {
     }
 
     private record RequestResult(boolean success, int statusCode, String body) {
+    }
+
+    private static String buildPunchToken(String roomName, String updatedAt) {
+        return roomName + "-" + updatedAt.replace(":", "").replace("-", "").replace(".", "");
     }
 }

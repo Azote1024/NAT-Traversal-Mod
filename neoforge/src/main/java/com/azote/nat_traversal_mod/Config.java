@@ -3,6 +3,9 @@ package com.azote.nat_traversal_mod;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public class Config {
+    private static final int QUIC_ATTEMPTS_DEFAULT = 3;
+    private static final int QUIC_ATTEMPT_INTERVAL_MS_DEFAULT = 700;
+
     private static final ModConfigSpec.Builder COMMON_BUILDER = new ModConfigSpec.Builder();
     private static final ModConfigSpec.Builder SERVER_BUILDER = new ModConfigSpec.Builder();
     private static final ModConfigSpec.Builder CLIENT_BUILDER = new ModConfigSpec.Builder();
@@ -72,6 +75,14 @@ public class Config {
             .comment("QUIC status: ready or down")
             .define("quic_status", "down");
 
+    private static final ModConfigSpec.ConfigValue<String> QUIC_TLS_CERT_FILE_VALUE = SERVER_BUILDER
+            .comment("QUIC server TLS certificate file path (PEM)")
+            .define("quic_tls_cert_file", "");
+
+    private static final ModConfigSpec.ConfigValue<String> QUIC_TLS_KEY_FILE_VALUE = SERVER_BUILDER
+            .comment("QUIC server TLS private key file path (PEM)")
+            .define("quic_tls_key_file", "");
+
     private static final ModConfigSpec.BooleanValue RELAY_CLIENT_CONNECTOR_ENABLED_VALUE = CLIENT_BUILDER
             .comment("Enable local relay client connector path")
             .define("relay_client_connector_enabled", false);
@@ -90,11 +101,15 @@ public class Config {
 
     private static final ModConfigSpec.IntValue QUIC_ATTEMPTS_VALUE = CLIENT_BUILDER
             .comment("Number of QUIC attempts before fallback")
-            .defineInRange("quic_attempts", 3, 1, 10);
+            .defineInRange("quic_attempts", QUIC_ATTEMPTS_DEFAULT, 1, 10);
 
     private static final ModConfigSpec.IntValue QUIC_ATTEMPT_INTERVAL_MS_VALUE = CLIENT_BUILDER
             .comment("Delay between QUIC attempts in milliseconds")
-            .defineInRange("quic_attempt_interval_ms", 700, 100, 5000);
+            .defineInRange("quic_attempt_interval_ms", QUIC_ATTEMPT_INTERVAL_MS_DEFAULT, 100, 5000);
+
+    private static final ModConfigSpec.IntValue QUIC_CLIENT_LOCAL_PORT_VALUE = CLIENT_BUILDER
+            .comment("Local QUIC client tunnel port")
+            .defineInRange("quic_client_local_port", 26668, 1, 65535);
 
     private static final ModConfigSpec.ConfigValue<String> QUIC_TLS_MODE_VALUE = CLIENT_BUILDER
             .comment("QUIC TLS mode: ca_or_pinned or insecure_trust_all")
@@ -175,6 +190,14 @@ public class Config {
         return QUIC_STATUS_VALUE.get().trim();
     }
 
+    public static String quicTlsCertFile() {
+        return QUIC_TLS_CERT_FILE_VALUE.get().trim();
+    }
+
+    public static String quicTlsKeyFile() {
+        return QUIC_TLS_KEY_FILE_VALUE.get().trim();
+    }
+
     public static boolean relayClientConnectorEnabled() {
         return RELAY_CLIENT_CONNECTOR_ENABLED_VALUE.get();
     }
@@ -204,11 +227,15 @@ public class Config {
     }
 
     public static int quicAttempts() {
-        return QUIC_ATTEMPTS_VALUE.get();
+        return getClientIntOrDefault(QUIC_ATTEMPTS_VALUE, QUIC_ATTEMPTS_DEFAULT);
     }
 
     public static int quicAttemptIntervalMs() {
-        return QUIC_ATTEMPT_INTERVAL_MS_VALUE.get();
+        return getClientIntOrDefault(QUIC_ATTEMPT_INTERVAL_MS_VALUE, QUIC_ATTEMPT_INTERVAL_MS_DEFAULT);
+    }
+
+    public static int quicClientLocalPort() {
+        return QUIC_CLIENT_LOCAL_PORT_VALUE.get();
     }
 
     public static String quicTlsMode() {
@@ -221,6 +248,15 @@ public class Config {
 
     public static String quicCertFingerprintSha256() {
         return QUIC_CERT_FINGERPRINT_SHA256_VALUE.get().trim();
+    }
+
+    private static int getClientIntOrDefault(ModConfigSpec.IntValue value, int defaultValue) {
+        try {
+            return value.get();
+        } catch (IllegalStateException ignored) {
+            // Dedicated server startup can access client-only config values before client config is loaded.
+            return defaultValue;
+        }
     }
 }
 

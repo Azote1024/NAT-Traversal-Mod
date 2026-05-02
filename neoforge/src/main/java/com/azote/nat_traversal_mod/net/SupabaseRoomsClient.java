@@ -148,28 +148,53 @@ public final class SupabaseRoomsClient {
         }
 
         long ageMillis = Duration.between(updatedAt, Instant.now()).toMillis();
-        if (ageMillis < 0L || ageMillis > ROOM_FRESHNESS_TTL_MILLIS) {
-            Nat_traversal_mod.LOGGER.warn(
-                    "[nat-traversal-mod] Room data is stale. room_name='{}', age_ms={}, ttl_ms={}. Fallback to original target.",
+        boolean isFresh = ageMillis >= 0L && ageMillis <= ROOM_FRESHNESS_TTL_MILLIS;
+        if (!isFresh) {
+            if (!Config.quicFirstMode()) {
+                Nat_traversal_mod.LOGGER.warn(
+                        "[nat-traversal-mod] Room data is stale. room_name='{}', age_ms={}, ttl_ms={}. Fallback to original target.",
+                        roomName,
+                        ageMillis,
+                        ROOM_FRESHNESS_TTL_MILLIS
+                );
+                return Optional.empty();
+            }
+
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] Room data is stale but quic_first mode allows QUIC route attempt. room_name='{}', age_ms={}, ttl_ms={}",
                     roomName,
                     ageMillis,
                     ROOM_FRESHNESS_TTL_MILLIS
             );
-            return Optional.empty();
         }
 
-        Nat_traversal_mod.LOGGER.info(
-                "[nat-traversal-mod] Room data is fresh. room_name='{}', age_ms={}, ttl_ms={}",
-                roomName,
-                ageMillis,
-                ROOM_FRESHNESS_TTL_MILLIS
-        );
+        if (isFresh) {
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] Room data is fresh. room_name='{}', age_ms={}, ttl_ms={}",
+                    roomName,
+                    ageMillis,
+                    ROOM_FRESHNESS_TTL_MILLIS
+            );
+        }
 
         if (Config.quicFirstMode()) {
+            Optional<String> quicSessionBody = SupabaseQuicSessionClient.fetchSessionBody(roomName);
+            if (quicSessionBody.isPresent()) {
+                Optional<ResolvedTarget> quicSessionTarget = QuicP2pManager.tryResolveFromSessionBody(quicSessionBody.get(), roomName);
+                if (quicSessionTarget.isPresent()) {
+                    return quicSessionTarget;
+                }
+            }
+
             Optional<ResolvedTarget> quicTarget = QuicP2pManager.tryResolveFromRoom(body, roomName);
             if (quicTarget.isPresent()) {
                 return quicTarget;
             }
+
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] QUIC route unavailable. room_name='{}'. Try relay/public fallback.",
+                    roomName
+            );
 
             Optional<ResolvedTarget> relayEndpointTarget = parseRelayEndpoint(body, roomName);
             if (relayEndpointTarget.isPresent()) {

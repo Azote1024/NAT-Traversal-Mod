@@ -45,5 +45,8 @@ Set-Location ".\neoforge"
 ## 注意
 
 - relay ポートは設定で変更可能
+- `relay_priority_mode` は `quic_first` も利用可能
+- `quic_tls_mode=ca_or_pinned` は CA 検証に加え、`quic_cert_fingerprint_sha256` 一致時のみ自己署名を許可
+- `quic_tls_mode=insecure_trust_all` は開発用途のみ
 
 

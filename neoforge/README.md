@@ -45,4 +45,7 @@ Set-Location ".\neoforge"
 ## Notes
 
 - Relay port values are configurable.
+- `relay_priority_mode` also supports `quic_first`.
+- `quic_tls_mode=ca_or_pinned` uses CA validation and accepts self-signed only when `quic_cert_fingerprint_sha256` matches.
+- `quic_tls_mode=insecure_trust_all` is for development only.
 

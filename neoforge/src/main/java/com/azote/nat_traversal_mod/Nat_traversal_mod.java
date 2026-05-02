@@ -2,6 +2,8 @@ package com.azote.nat_traversal_mod;
 
 import com.azote.nat_traversal_mod.net.SupabaseRoomsPublisher;
 import com.azote.nat_traversal_mod.net.RelayHostConnector;
+import com.azote.nat_traversal_mod.net.QuicServerTunnel;
+import com.azote.nat_traversal_mod.net.QuicServerTunnelFactory;
 import com.mojang.logging.LogUtils;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -26,6 +28,7 @@ public class Nat_traversal_mod {
     private static final long PUBLISH_INTERVAL_SECONDS = 60L;
     private ScheduledExecutorService roomPublisherScheduler;
     private final RelayHostConnector relayHostConnector = new RelayHostConnector();
+    private final QuicServerTunnel quicServerTunnel = QuicServerTunnelFactory.create();
 
     // The constructor for the mod class is the first code that is run when your mod is loaded.
     // FML will recognize some parameter types like IEventBus or ModContainer and pass them in automatically.
@@ -46,12 +49,14 @@ public class Nat_traversal_mod {
 
         SupabaseRoomsPublisher.publishOpenRoom(serverPort);
         relayHostConnector.start(serverPort);
+        quicServerTunnel.start(serverPort);
         startPeriodicPublish(serverPort);
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
         stopPeriodicPublish();
         relayHostConnector.stop();
+        quicServerTunnel.stop();
         SupabaseRoomsPublisher.closeRoomAsync();
     }
 

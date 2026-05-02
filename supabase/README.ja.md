@@ -16,6 +16,8 @@ Supabase はシグナリング情報（`public.rooms`）の保存にのみ使用
 ## migration
 
 - `migrations/20260430165635_remote_schema.sql`（v1.0.0基準スキーマ）
+- `migrations/20260502090000_quic_sessions.sql`（QUIC専用 `public.quic_sessions`）
+  - one-shot hole punching 最小項目（`punch_status`, `punch_token`, `client_punch_sent_at`）を含む
 
 ## Option A: クラウドSupabase
 

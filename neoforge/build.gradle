@@ -10,6 +10,7 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    mavenCentral()
 }
 
 base {
@@ -63,8 +64,33 @@ neoForge {
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
+def quicClassesJar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-classes-quic-0.0.73.Final-SNAPSHOT.jar")
+def quicNativeWinJar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-windows-x86_64.jar")
+def quicNativeLinuxX64Jar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-x86_64.jar")
+def quicNativeLinuxArm64Jar = file("../ref/quicprotocolsupport/libs/netty-incubator-codec-native-quic-0.0.73.Final-SNAPSHOT-linux-aarch_64.jar")
+
 
 dependencies {
+    implementation files(quicClassesJar)
+    jarJar files(quicClassesJar)
+    runtimeOnly files(quicNativeWinJar)
+    runtimeOnly files(quicNativeLinuxX64Jar)
+    runtimeOnly files(quicNativeLinuxArm64Jar)
+}
+
+tasks.withType(JavaExec).configureEach {
+    // NeoForge run tasks don't always inherit file() dependencies reliably; force QUIC jars into launch classpaths.
+    classpath += files(quicClassesJar, quicNativeWinJar, quicNativeLinuxX64Jar, quicNativeLinuxArm64Jar)
+}
+
+tasks.register("unpackQuicClasses", Copy) {
+    from(zipTree(quicClassesJar))
+    include "io/netty/incubator/codec/quic/**"
+    into layout.buildDirectory.dir("classes/java/main")
+}
+
+tasks.named("classes") {
+    dependsOn("unpackQuicClasses")
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
