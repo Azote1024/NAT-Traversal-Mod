@@ -3,8 +3,10 @@ package com.azote.nat_traversal_mod;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public class Config {
+    private static final int TCP_ATTEMPTS_DEFAULT = 2;
     private static final int QUIC_ATTEMPTS_DEFAULT = 3;
     private static final int QUIC_ATTEMPT_INTERVAL_MS_DEFAULT = 700;
+    private static final int ROUTE_STAGE_RESET_MS_DEFAULT = 30_000;
 
     private static final ModConfigSpec.Builder COMMON_BUILDER = new ModConfigSpec.Builder();
     private static final ModConfigSpec.Builder SERVER_BUILDER = new ModConfigSpec.Builder();
@@ -92,8 +94,12 @@ public class Config {
             .defineInRange("relay_client_local_port", 26667, 1, 65535);
 
     private static final ModConfigSpec.ConfigValue<String> RELAY_PRIORITY_MODE_VALUE = CLIENT_BUILDER
-            .comment("Route priority mode: public_first, relay_first, or quic_first")
+            .comment("Route priority mode: public_first, relay_first, quic_first, or tcp_quic_relay")
             .define("relay_priority_mode", "public_first");
+
+    private static final ModConfigSpec.IntValue TCP_ATTEMPTS_VALUE = CLIENT_BUILDER
+            .comment("Number of direct TCP attempts before entering QUIC stage in tcp_quic_relay mode")
+            .defineInRange("tcp_attempts", TCP_ATTEMPTS_DEFAULT, 0, 10);
 
     private static final ModConfigSpec.BooleanValue QUIC_ENABLED_VALUE = CLIENT_BUILDER
             .comment("Enable QUIC P2P route")
@@ -106,6 +112,10 @@ public class Config {
     private static final ModConfigSpec.IntValue QUIC_ATTEMPT_INTERVAL_MS_VALUE = CLIENT_BUILDER
             .comment("Delay between QUIC attempts in milliseconds")
             .defineInRange("quic_attempt_interval_ms", QUIC_ATTEMPT_INTERVAL_MS_DEFAULT, 100, 5000);
+
+    private static final ModConfigSpec.IntValue ROUTE_STAGE_RESET_MS_VALUE = CLIENT_BUILDER
+            .comment("Reset window for tcp_quic_relay stage counters in milliseconds")
+            .defineInRange("route_stage_reset_ms", ROUTE_STAGE_RESET_MS_DEFAULT, 1000, 600000);
 
     private static final ModConfigSpec.IntValue QUIC_CLIENT_LOCAL_PORT_VALUE = CLIENT_BUILDER
             .comment("Local QUIC client tunnel port")
@@ -208,7 +218,7 @@ public class Config {
 
     public static String relayPriorityMode() {
         String mode = RELAY_PRIORITY_MODE_VALUE.get().trim().toLowerCase();
-        if (mode.equals("relay_first") || mode.equals("public_first") || mode.equals("quic_first")) {
+        if (mode.equals("relay_first") || mode.equals("public_first") || mode.equals("quic_first") || mode.equals("tcp_quic_relay")) {
             return mode;
         }
         return "public_first";
@@ -222,6 +232,10 @@ public class Config {
         return "quic_first".equals(relayPriorityMode());
     }
 
+    public static boolean tcpQuicRelayMode() {
+        return "tcp_quic_relay".equals(relayPriorityMode());
+    }
+
     public static boolean quicEnabled() {
         return QUIC_ENABLED_VALUE.get();
     }
@@ -230,8 +244,16 @@ public class Config {
         return getClientIntOrDefault(QUIC_ATTEMPTS_VALUE, QUIC_ATTEMPTS_DEFAULT);
     }
 
+    public static int tcpAttempts() {
+        return getClientIntOrDefault(TCP_ATTEMPTS_VALUE, TCP_ATTEMPTS_DEFAULT);
+    }
+
     public static int quicAttemptIntervalMs() {
         return getClientIntOrDefault(QUIC_ATTEMPT_INTERVAL_MS_VALUE, QUIC_ATTEMPT_INTERVAL_MS_DEFAULT);
+    }
+
+    public static int routeStageResetMs() {
+        return getClientIntOrDefault(ROUTE_STAGE_RESET_MS_VALUE, ROUTE_STAGE_RESET_MS_DEFAULT);
     }
 
     public static int quicClientLocalPort() {

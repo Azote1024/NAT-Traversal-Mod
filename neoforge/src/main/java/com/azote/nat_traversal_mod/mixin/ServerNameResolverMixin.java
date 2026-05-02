@@ -5,6 +5,8 @@ import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import com.azote.nat_traversal_mod.net.ConnectionTargetResolver;
 import com.azote.nat_traversal_mod.net.RelayEndpoint;
 import com.azote.nat_traversal_mod.net.QuicDirectRouteContext;
+import com.azote.nat_traversal_mod.net.RouteAttemptPlanner;
+import com.azote.nat_traversal_mod.net.RelayClientConnectorManager;
 import com.azote.nat_traversal_mod.net.ResolvedTarget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
@@ -43,6 +45,39 @@ public class ServerNameResolverMixin {
                 Config.roomName()
         );
 
+        if (Config.tcpQuicRelayMode()) {
+            Optional<RouteAttemptPlanner.Decision> stagedDecision = natTraversalMod$planConnectorDecision();
+            if (stagedDecision.isPresent()) {
+                RouteAttemptPlanner.Decision decision = stagedDecision.get();
+                if (decision == RouteAttemptPlanner.Decision.TCP_DIRECT) {
+                    Nat_traversal_mod.LOGGER.info(
+                            "[nat-traversal-mod] tcp_quic_relay stage=tcp_direct. keep original target='{}:{}'",
+                            requestedHost,
+                            requestedPort
+                    );
+                    return;
+                }
+                if (decision == RouteAttemptPlanner.Decision.RELAY) {
+                    if (RelayClientConnectorManager.ensureStarted()) {
+                        int relayPort = Config.relayClientLocalPort();
+                        InetSocketAddress relayTarget = new InetSocketAddress("127.0.0.1", relayPort);
+                        Nat_traversal_mod.LOGGER.info(
+                                "[nat-traversal-mod] tcp_quic_relay stage=relay. route='{}:{}'",
+                                relayTarget.getHostString(),
+                                relayTarget.getPort()
+                        );
+                        cir.setReturnValue(Optional.of(ResolvedServerAddress.from(relayTarget)));
+                        return;
+                    }
+                    Nat_traversal_mod.LOGGER.warn(
+                            "[nat-traversal-mod] tcp_quic_relay stage=relay but relay connector unavailable. fallback to original target."
+                    );
+                    return;
+                }
+                Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] tcp_quic_relay stage=quic_direct.");
+            }
+        }
+
         Optional<ResolvedTarget> maybeTarget = ConnectionTargetResolver.resolve();
         if (maybeTarget.isEmpty()) {
             Nat_traversal_mod.LOGGER.warn(
@@ -74,6 +109,20 @@ public class ServerNameResolverMixin {
 
         natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + connectHost + ":" + target.hostPort());
         cir.setReturnValue(Optional.of(resolvedAddress));
+    }
+
+    @Unique
+    private static Optional<RouteAttemptPlanner.Decision> natTraversalMod$planConnectorDecision() {
+        if (!Thread.currentThread().getName().startsWith("Server Connector")) {
+            return Optional.empty();
+        }
+        RouteAttemptPlanner.Decision decision = RouteAttemptPlanner.planForConnector(
+                Config.roomName(),
+                Config.tcpAttempts(),
+                Config.quicAttempts(),
+                Config.routeStageResetMs()
+        );
+        return Optional.of(decision);
     }
 
     @Unique
