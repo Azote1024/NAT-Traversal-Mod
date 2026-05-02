@@ -3,6 +3,7 @@ package com.azote.nat_traversal_mod.mixin;
 import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import com.azote.nat_traversal_mod.net.ConnectionTargetResolver;
+import com.azote.nat_traversal_mod.net.RelayEndpoint;
 import com.azote.nat_traversal_mod.net.QuicDirectRouteContext;
 import com.azote.nat_traversal_mod.net.ResolvedTarget;
 import net.minecraft.client.Minecraft;
@@ -65,6 +66,9 @@ public class ServerNameResolverMixin {
                 connectHost,
                 target.hostPort()
         );
+
+        // Keep pending direct-route context synchronized with the actual resolved address.
+        QuicDirectRouteContext.set(new RelayEndpoint(connectHost, target.hostPort()));
 
         natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + connectHost + ":" + target.hostPort());
         cir.setReturnValue(Optional.of(resolvedAddress));
