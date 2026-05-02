@@ -18,8 +18,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 // The value here should match an entry in the META-INF/neoforge.mods.toml file
-@Mod(Nat_traversal_mod.MODID)
-public class Nat_traversal_mod {
+@Mod(NatTraversalMod.MODID)
+public class NatTraversalMod {
     // Define mod id in a common place for everything to reference
     public static final String MODID = "nat_traversal_mod";
     // Directly reference a slf4j logger
@@ -32,7 +32,7 @@ public class Nat_traversal_mod {
 
     // The constructor for the mod class is the first code that is run when your mod is loaded.
     // FML will recognize some parameter types like IEventBus or ModContainer and pass them in automatically.
-    public Nat_traversal_mod(ModContainer modContainer) {
+    public NatTraversalMod(ModContainer modContainer) {
         // Register split specs so side-specific keys are separated into common/server/client config files.
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.COMMON_SPEC);
         modContainer.registerConfig(ModConfig.Type.SERVER, Config.SERVER_SPEC);
@@ -62,18 +62,17 @@ public class Nat_traversal_mod {
 
     private void startPeriodicPublish(int serverPort) {
         stopPeriodicPublish();
-        roomPublisherScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        roomPublisherScheduler = createRoomPublisherScheduler();
+        long intervalSeconds = PUBLISH_INTERVAL_SECONDS;
+        roomPublisherScheduler.scheduleAtFixedRate(() -> SupabaseRoomsPublisher.publishOpenRoom(serverPort), intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+    }
+
+    private static ScheduledExecutorService createRoomPublisherScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "nat-traversal-room-publisher");
             thread.setDaemon(true);
             return thread;
         });
-
-        roomPublisherScheduler.scheduleAtFixedRate(
-                () -> SupabaseRoomsPublisher.publishOpenRoom(serverPort),
-                PUBLISH_INTERVAL_SECONDS,
-                PUBLISH_INTERVAL_SECONDS,
-                TimeUnit.SECONDS
-        );
     }
 
     private void stopPeriodicPublish() {
@@ -85,3 +84,4 @@ public class Nat_traversal_mod {
         roomPublisherScheduler = null;
     }
 }
+

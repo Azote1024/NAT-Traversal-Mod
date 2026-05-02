@@ -1,6 +1,6 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import io.netty.channel.ChannelFuture;
 import net.minecraft.network.Connection;
@@ -34,7 +34,7 @@ public final class QuicDirectConnectorFactory {
             }
             throw new IllegalStateException("Unexpected connector type: " + connectorClass.getName());
         } catch (Throwable throwable) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC direct connector backend unavailable. Direct QUIC client connect disabled.",
                     throwable
             );
@@ -42,4 +42,5 @@ public final class QuicDirectConnectorFactory {
         }
     }
 }
+
 

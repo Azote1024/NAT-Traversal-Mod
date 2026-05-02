@@ -1,7 +1,7 @@
 package com.azote.nat_traversal_mod.net;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -63,7 +63,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 .syncUninterruptibly()
                 .channel();
 
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] quic_direct phase=dial_start room_name='{}' attempt_id='{}' target='{}:{}' epoll={} tls_mode='{}'",
                 roomName,
                 normalizedAttemptId,
@@ -81,7 +81,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 .connect();
 
         if (!quicConnectFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !quicConnectFuture.isSuccess()) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] quic_direct phase=channel_connect_failed room_name='{}' attempt_id='{}' target='{}:{}'",
                     roomName,
                     normalizedAttemptId,
@@ -109,7 +109,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         });
 
         if (!streamFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !streamFuture.isSuccess()) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] quic_direct phase=stream_create_failed room_name='{}' attempt_id='{}' target='{}:{}'",
                     roomName,
                     normalizedAttemptId,
@@ -130,7 +130,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
             return Optional.empty();
         }
 
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] quic_direct phase=stream_ready room_name='{}' attempt_id='{}' target='{}:{}'",
                 roomName,
                 normalizedAttemptId,
@@ -149,7 +149,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
             udpChannel.writeAndFlush(packet).syncUninterruptibly();
         }
 
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] quic_direct phase=pre_punch_sent room_name='{}' attempt_id='{}' target='{}:{}' count=3",
                 roomName,
                 attemptId,
@@ -171,4 +171,5 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         }
     }
 }
+
 

@@ -1,7 +1,7 @@
 package com.azote.nat_traversal_mod.net;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -28,7 +28,7 @@ public final class RelayClientConnectorManager {
 
         String token = Config.relayToken();
         if (token.isBlank()) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] relay_token is empty. Relay client connector disabled.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] relay_token is empty. Relay client connector disabled.");
             return false;
         }
 
@@ -42,7 +42,7 @@ public final class RelayClientConnectorManager {
         thread.setDaemon(true);
         thread.start();
         started = true;
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Relay client connector started on 127.0.0.1:{}", localPort);
+        NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay client connector started on 127.0.0.1:{}", localPort);
         return true;
     }
 
@@ -56,7 +56,7 @@ public final class RelayClientConnectorManager {
                 thread.start();
             }
         } catch (IOException exception) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Relay client connector stopped.", exception);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Relay client connector stopped.", exception);
             started = false;
         }
     }
@@ -75,7 +75,7 @@ public final class RelayClientConnectorManager {
             sendHello(relaySocket, token, "client");
             RelayIoBridge.bridge(localSocket, relaySocket);
         } catch (IOException | InterruptedException exception) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Relay client session failed.", exception);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Relay client session failed.", exception);
             if (exception instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
@@ -92,5 +92,6 @@ public final class RelayClientConnectorManager {
         out.flush();
     }
 }
+
 
 

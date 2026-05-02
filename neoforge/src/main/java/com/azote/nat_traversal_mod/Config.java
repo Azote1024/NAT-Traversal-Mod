@@ -221,7 +221,8 @@ public class Config {
         if (mode.equals("relay_first") || mode.equals("public_first") || mode.equals("quic_first") || mode.equals("tcp_quic_relay")) {
             return mode;
         }
-        return "public_first";
+        // Keep behavior aligned with config default when an invalid value is provided.
+        return "tcp_quic_relay";
     }
 
     public static boolean relayFirstMode() {
@@ -281,4 +282,5 @@ public class Config {
         }
     }
 }
+
 

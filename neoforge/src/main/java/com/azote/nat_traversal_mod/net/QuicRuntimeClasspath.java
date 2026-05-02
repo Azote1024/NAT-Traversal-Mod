@@ -1,6 +1,6 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 final class QuicRuntimeClasspath {
     private static final String QUIC_TOKEN_HANDLER_CLASS = "io.netty.incubator.codec.quic.QuicTokenHandler";
@@ -12,11 +12,11 @@ final class QuicRuntimeClasspath {
     static boolean ensureAvailable() {
         if (isQuicClassVisible()) {
             if (!isResourceVisibleInAnyLoader(QUIC_NATIVE_WINDOWS_RESOURCE)) {
-                Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC native resource is not visible: {}", QUIC_NATIVE_WINDOWS_RESOURCE);
+                NatTraversalMod.LOGGER.info("[nat-traversal-mod] QUIC native resource is not visible: {}", QUIC_NATIVE_WINDOWS_RESOURCE);
             }
             return true;
         }
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC runtime classes are not visible in current classloaders.");
+        NatTraversalMod.LOGGER.info("[nat-traversal-mod] QUIC runtime classes are not visible in current classloaders.");
         return false;
     }
 
@@ -61,4 +61,5 @@ final class QuicRuntimeClasspath {
         }
     }
 }
+
 

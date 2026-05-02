@@ -1,7 +1,7 @@
 package com.azote.nat_traversal_mod.net;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -73,7 +73,7 @@ final class NettyQuicTransport implements QuicTransport {
         thread.setDaemon(true);
         thread.start();
         localTunnelStarted = true;
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC client tunnel started on 127.0.0.1:{}", localPort);
+        NatTraversalMod.LOGGER.info("[nat-traversal-mod] QUIC client tunnel started on 127.0.0.1:{}", localPort);
     }
 
     private void runLocalTunnelLoop(int localPort) {
@@ -85,7 +85,7 @@ final class NettyQuicTransport implements QuicTransport {
                 thread.start();
             }
         } catch (IOException exception) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] QUIC client tunnel stopped.", exception);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] QUIC client tunnel stopped.", exception);
             localTunnelStarted = false;
         }
     }
@@ -101,7 +101,7 @@ final class NettyQuicTransport implements QuicTransport {
             QuicStreamChannel stream = openQuicStream(endpoint);
             QuicSocketBridge.bridge(localSocket, stream, "nat-quic-client-writer");
         } catch (RuntimeException | IOException exception) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] QUIC client session failed.", exception);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] QUIC client session failed.", exception);
             RelayIoBridge.closeQuietly(localSocket);
         }
     }
@@ -122,7 +122,7 @@ final class NettyQuicTransport implements QuicTransport {
 
         if ("insecure_trust_all".equals(Config.quicTlsMode())) {
             sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] QUIC TLS mode uses insecure trust-all. room route security is reduced.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] QUIC TLS mode uses insecure trust-all. room route security is reduced.");
         } else {
             X509TrustManager trustManager = createCaOrPinnedTrustManager(Config.quicCertFingerprintSha256());
             sslContextBuilder.trustManager(trustManager);
@@ -199,7 +199,7 @@ final class NettyQuicTransport implements QuicTransport {
                 if (!normalizedPinned.isEmpty() && chain != null && chain.length > 0) {
                     String actual = sha256Fingerprint(chain[0]);
                     if (actual.equalsIgnoreCase(normalizedPinned)) {
-                        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC server certificate accepted by pinned fingerprint.");
+                        NatTraversalMod.LOGGER.info("[nat-traversal-mod] QUIC server certificate accepted by pinned fingerprint.");
                         return;
                     }
                 }
@@ -240,7 +240,7 @@ final class NettyQuicTransport implements QuicTransport {
                 return result;
             }
         } catch (Exception exception) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Failed to load default trust managers for QUIC.", exception);
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Failed to load default trust managers for QUIC.", exception);
         }
         throw new IllegalStateException("Default X509TrustManager is unavailable");
     }
@@ -278,5 +278,6 @@ final class NettyQuicTransport implements QuicTransport {
         }
     }
 }
+
 
 

@@ -1,6 +1,6 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -29,7 +29,7 @@ final class UdpHolePunchClient {
             }
             return true;
         } catch (Exception exception) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] UDP hole punch failed. room_name='{}', endpoint='{}:{}'",
                     roomName,
                     endpoint.host(),
@@ -43,4 +43,5 @@ final class UdpHolePunchClient {
         }
     }
 }
+
 

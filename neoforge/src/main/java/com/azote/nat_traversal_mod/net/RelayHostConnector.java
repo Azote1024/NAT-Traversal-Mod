@@ -1,7 +1,7 @@
 package com.azote.nat_traversal_mod.net;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -44,7 +44,7 @@ public final class RelayHostConnector {
                 runSession(config);
                 sleepQuietly(500);
             } catch (RuntimeException exception) {
-                Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Relay host connector error.", exception);
+                NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Relay host connector error.", exception);
                 sleepQuietly(2000);
             }
         }
@@ -59,7 +59,7 @@ public final class RelayHostConnector {
 
             localSocket.connect(new InetSocketAddress("127.0.0.1", serverPort), 3000);
 
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] Relay host connector paired. relay='{}:{}', local='127.0.0.1:{}'",
                     config.endpoint.host(),
                     config.endpoint.port(),
@@ -69,7 +69,7 @@ public final class RelayHostConnector {
             RelayIoBridge.bridge(relaySocket, localSocket);
         } catch (IOException | InterruptedException exception) {
             if (running) {
-                Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] Relay host connector session failed.", exception);
+                NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Relay host connector session failed.", exception);
             }
             if (exception instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -96,7 +96,7 @@ public final class RelayHostConnector {
 
         String token = Config.relayToken();
         if (token.isBlank()) {
-            Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] relay_token is empty. Relay host connector disabled.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] relay_token is empty. Relay host connector disabled.");
             return null;
         }
 
@@ -115,5 +115,6 @@ public final class RelayHostConnector {
     private record RelaySessionConfig(RelayEndpoint endpoint, String token) {
     }
 }
+
 
 

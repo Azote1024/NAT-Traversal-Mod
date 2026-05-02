@@ -1,12 +1,11 @@
 package com.azote.nat_traversal_mod.net;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -19,9 +18,6 @@ import java.util.regex.Pattern;
 final class SupabaseQuicSessionClient {
 	private static final Pattern ATTEMPT_ID_PATTERN = Pattern.compile("\"attempt_id\"\\s*:\\s*\"([^\"]*)\"");
 	private static volatile boolean peerAttemptsUnavailableLogged;
-	private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-			.connectTimeout(Duration.ofSeconds(3))
-			.build();
 
 	private SupabaseQuicSessionClient() {
 	}
@@ -60,7 +56,7 @@ final class SupabaseQuicSessionClient {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
 			}
-			Nat_traversal_mod.LOGGER.info(
+			NatTraversalMod.LOGGER.info(
 					"[nat-traversal-mod] QUIC session query exception. room_name='{}'.",
 					roomName,
 					exception
@@ -89,20 +85,20 @@ final class SupabaseQuicSessionClient {
 				.GET()
 				.build();
 
-		HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+		HttpResponse<String> response = SupabaseRestClient.sendString(request);
 		if (response.statusCode() >= 200 && response.statusCode() < 300) {
 			return Optional.of(response.body());
 		}
 
 		if (!fallbackMode && response.statusCode() == 400) {
-			Nat_traversal_mod.LOGGER.info(
+			NatTraversalMod.LOGGER.info(
 					"[nat-traversal-mod] QUIC session query schema mismatch. retry with legacy select. room_name='{}'",
 					roomName
 			);
 			return Optional.empty();
 		}
 
-		Nat_traversal_mod.LOGGER.info(
+		NatTraversalMod.LOGGER.info(
 				"[nat-traversal-mod] QUIC session query failed. status={}, room_name='{}'.",
 				response.statusCode(),
 				roomName
@@ -116,14 +112,14 @@ final class SupabaseQuicSessionClient {
 
 	static void markClientAttemptStarted(String roomName, String attemptId) {
 		patchSession(roomName, "{"
-				+ "\"attempt_id\":\"" + jsonEscape(attemptId) + "\","
+				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
 				+ "\"last_error_code\":\"\""
 				+ "}", "Failed to mark client attempt id");
 	}
 
 	static void markClientPunchSent(String roomName, String attemptId) {
 		patchSession(roomName, "{"
-				+ "\"attempt_id\":\"" + jsonEscape(attemptId) + "\","
+				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
 				+ "\"punch_status\":\"client_probe_sent\","
 				+ "\"client_punch_sent_at\":\"" + Instant.now() + "\","
 				+ "\"last_error_code\":\"\""
@@ -156,14 +152,14 @@ final class SupabaseQuicSessionClient {
 		}
 		patchSession(roomName, "{"
 				+ "\"punch_status\":\"down\","
-				+ "\"last_error_code\":\"" + jsonEscape(normalizedErrorCode) + "\""
+				+ "\"last_error_code\":\"" + SupabaseJsonUtil.escape(normalizedErrorCode) + "\""
 				+ "}", "Failed to mark host punch down");
 	}
 
-	static void markRouteDecision(String roomName, String routeDecision, String relayReason) {
+	static void markRouteDecisionQuicTry(String roomName) {
 		patchSession(roomName, "{"
-				+ "\"route_decision\":\"" + jsonEscape(routeDecision == null ? "" : routeDecision) + "\","
-				+ "\"relay_reason\":\"" + jsonEscape(relayReason == null ? "" : relayReason) + "\","
+				+ "\"route_decision\":\"quic_try\","
+				+ "\"relay_reason\":\"\","
 				+ "\"route_decided_at\":\"" + Instant.now() + "\""
 				+ "}", "Failed to mark route decision");
 	}
@@ -187,13 +183,13 @@ final class SupabaseQuicSessionClient {
 		String endpoint = supabaseUrl + "/rest/v1/quic_peer_attempts";
 		String now = Instant.now().toString();
 		String body = "{"
-				+ "\"room_name\":\"" + jsonEscape(roomName) + "\","
-				+ "\"client_key\":\"" + jsonEscape(clientKey) + "\","
-				+ "\"attempt_id\":\"" + jsonEscape(attemptId) + "\","
-				+ "\"client_nat_type\":\"" + jsonEscape(normalizeNatType(clientNatType)) + "\","
-				+ "\"decision\":\"" + jsonEscape(decision == null ? "" : decision) + "\","
-				+ "\"punch_status\":\"" + jsonEscape(punchStatus == null ? "" : punchStatus) + "\","
-				+ "\"last_error_code\":\"" + jsonEscape(lastErrorCode == null ? "" : lastErrorCode) + "\","
+				+ "\"room_name\":\"" + SupabaseJsonUtil.escape(roomName) + "\","
+				+ "\"client_key\":\"" + SupabaseJsonUtil.escape(clientKey) + "\","
+				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
+				+ "\"client_nat_type\":\"" + SupabaseJsonUtil.escape(normalizeNatType(clientNatType)) + "\","
+				+ "\"decision\":\"" + SupabaseJsonUtil.escape(decision == null ? "" : decision) + "\","
+				+ "\"punch_status\":\"" + SupabaseJsonUtil.escape(punchStatus == null ? "" : punchStatus) + "\","
+				+ "\"last_error_code\":\"" + SupabaseJsonUtil.escape(lastErrorCode == null ? "" : lastErrorCode) + "\","
 				+ "\"updated_at\":\"" + now + "\""
 				+ (closed ? ",\"closed_at\":\"" + now + "\"" : "")
 				+ "}";
@@ -207,7 +203,7 @@ final class SupabaseQuicSessionClient {
 				.build();
 
 		try {
-			HttpResponse<Void> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.discarding());
+			HttpResponse<Void> response = SupabaseRestClient.sendDiscarding(request);
 			int status = response.statusCode();
 			if (status >= 200 && status < 300) {
 				return;
@@ -215,14 +211,14 @@ final class SupabaseQuicSessionClient {
 
 			if ((status == 400 || status == 404) && !peerAttemptsUnavailableLogged) {
 				peerAttemptsUnavailableLogged = true;
-				Nat_traversal_mod.LOGGER.info(
+				NatTraversalMod.LOGGER.info(
 						"[nat-traversal-mod] quic_peer_attempts endpoint unavailable. status={}",
 						status
 				);
 				return;
 			}
 
-			Nat_traversal_mod.LOGGER.info(
+			NatTraversalMod.LOGGER.info(
 					"[nat-traversal-mod] quic_peer_attempts upsert failed. status={}, room_name='{}', attempt_id='{}'",
 					status,
 					roomName,
@@ -232,7 +228,7 @@ final class SupabaseQuicSessionClient {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
 			}
-			Nat_traversal_mod.LOGGER.info(
+			NatTraversalMod.LOGGER.info(
 					"[nat-traversal-mod] quic_peer_attempts upsert exception. room_name='{}', attempt_id='{}'",
 					roomName,
 					attemptId,
@@ -262,9 +258,6 @@ final class SupabaseQuicSessionClient {
 		return Optional.of(attemptId);
 	}
 
-	private static String jsonEscape(String value) {
-		return value.replace("\\", "\\\\").replace("\"", "\\\"");
-	}
 
 	private static void patchSession(String roomName, String payload, String errorLogMessage) {
 		String supabaseUrl = Config.supabaseUrl();
@@ -285,13 +278,14 @@ final class SupabaseQuicSessionClient {
 				.build();
 
 		try {
-			HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.discarding());
+			SupabaseRestClient.sendDiscarding(request);
 		} catch (IOException | InterruptedException exception) {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
 			}
-			Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] {}. room_name='{}'", errorLogMessage, roomName, exception);
+			NatTraversalMod.LOGGER.info("[nat-traversal-mod] {}. room_name='{}'", errorLogMessage, roomName, exception);
 		}
 	}
 }
+
 

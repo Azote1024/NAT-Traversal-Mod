@@ -1,6 +1,6 @@
 package com.azote.nat_traversal_mod.net;
 
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 
 public final class QuicServerTunnelFactory {
     private QuicServerTunnelFactory() {
@@ -18,7 +18,7 @@ public final class QuicServerTunnelFactory {
             }
             throw new IllegalStateException("Unexpected backend type: " + backendClass.getName());
         } catch (Throwable throwable) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC server tunnel backend unavailable. Server-side QUIC disabled.",
                     throwable
             );
@@ -26,4 +26,5 @@ public final class QuicServerTunnelFactory {
         }
     }
 }
+
 

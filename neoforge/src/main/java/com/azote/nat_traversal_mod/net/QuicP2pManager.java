@@ -1,7 +1,7 @@
 package com.azote.nat_traversal_mod.net;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -49,7 +49,7 @@ public final class QuicP2pManager {
             }
             return new NettyQuicTransport();
         } catch (Throwable throwable) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC transport backend is unavailable. Fallback to relay/public routes.");
+            NatTraversalMod.LOGGER.info("[nat-traversal-mod] QUIC transport backend is unavailable. Fallback to relay/public routes.");
             return new NoopQuicTransport();
         }
     }
@@ -69,7 +69,7 @@ public final class QuicP2pManager {
         String status = statusValue.get().trim();
         if (!"ready".equalsIgnoreCase(status)) {
             if (!status.isEmpty()) {
-                Nat_traversal_mod.LOGGER.info(
+                NatTraversalMod.LOGGER.info(
                         "[nat-traversal-mod] QUIC hint exists but status is not ready. room_name='{}', quic_status='{}'",
                         roomName,
                         status
@@ -90,7 +90,7 @@ public final class QuicP2pManager {
         if (relayMatcher.find()) {
             String relayEndpoint = relayMatcher.group(1).trim();
             if (!relayEndpoint.isEmpty() && relayEndpoint.equalsIgnoreCase(endpoint)) {
-                Nat_traversal_mod.LOGGER.info(
+                NatTraversalMod.LOGGER.info(
                         "[nat-traversal-mod] Skip QUIC attempt because quic_endpoint matches relay_endpoint. room_name='{}'.",
                         roomName
                 );
@@ -154,7 +154,7 @@ public final class QuicP2pManager {
         if (QuicDirectConnectorFactory.isOperational()) {
             QuicDirectRouteContext.set(quicEndpoint, attemptId);
             logState(roomName, QuicRouteState.ESTABLISHED, "direct connector prepared");
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC direct route prepared. room_name='{}', attempt_id='{}', endpoint='{}:{}'",
                     roomName,
                     attemptId,
@@ -165,7 +165,7 @@ public final class QuicP2pManager {
         }
 
         if (!TRANSPORT.isOperational()) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC transport is not operational yet. room_name='{}'. Fallback to next route.",
                     roomName
             );
@@ -177,7 +177,7 @@ public final class QuicP2pManager {
         int intervalMs = Config.quicAttemptIntervalMs();
         for (int attempt = 1; attempt <= attempts; attempt++) {
             logState(roomName, QuicRouteState.ATTEMPTING, "attempt=" + attempt + "/" + attempts);
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC attempt {}/{} planned. room_name='{}', endpoint='{}', tls_mode='{}'.",
                     attempt,
                     attempts,
@@ -189,7 +189,7 @@ public final class QuicP2pManager {
             Optional<ResolvedTarget> localTarget = TRANSPORT.tryActivate(quicEndpoint, roomName);
             if (localTarget.isPresent()) {
                 logState(roomName, QuicRouteState.ESTABLISHED, "local target selected");
-                Nat_traversal_mod.LOGGER.info(
+                NatTraversalMod.LOGGER.info(
                         "[nat-traversal-mod] QUIC route selected. room_name='{}', target='{}:{}'",
                         roomName,
                         localTarget.get().hostIp(),
@@ -203,7 +203,7 @@ public final class QuicP2pManager {
             }
         }
 
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] QUIC attempts exhausted for room_name='{}'. Fallback to next route.",
                 roomName
         );
@@ -238,7 +238,7 @@ public final class QuicP2pManager {
                     "",
                     false
             );
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] One-shot UDP hole punch sent. room_name='{}', attempt_id='{}', endpoint='{}:{}'",
                     roomName,
                     attemptId,
@@ -264,7 +264,7 @@ public final class QuicP2pManager {
     }
 
     private static void logState(String roomName, QuicRouteState state, String detail) {
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] QUIC route state={}, room_name='{}', detail='{}'",
                 state,
                 roomName,
@@ -281,5 +281,6 @@ public final class QuicP2pManager {
         }
     }
 }
+
 
 

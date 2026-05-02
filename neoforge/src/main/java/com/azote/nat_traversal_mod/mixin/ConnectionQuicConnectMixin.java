@@ -1,7 +1,7 @@
 package com.azote.nat_traversal_mod.mixin;
 
 import com.azote.nat_traversal_mod.Config;
-import com.azote.nat_traversal_mod.Nat_traversal_mod;
+import com.azote.nat_traversal_mod.NatTraversalMod;
 import com.azote.nat_traversal_mod.net.QuicDirectConnectorFactory;
 import com.azote.nat_traversal_mod.net.QuicDirectRouteContext;
 import com.azote.nat_traversal_mod.net.RelayClientConnectorManager;
@@ -20,7 +20,7 @@ import java.util.Optional;
 public class ConnectionQuicConnectMixin {
     @Inject(method = "connect(Ljava/net/InetSocketAddress;ZLnet/minecraft/network/Connection;)Lio/netty/channel/ChannelFuture;", at = @At("HEAD"), cancellable = true)
     private static void natTraversalMod$connectQuic(InetSocketAddress address, boolean useEpoll, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] Connection.connect hook fired. target='{}:{}', useEpoll={}",
                 address.getHostString(),
                 address.getPort(),
@@ -29,20 +29,20 @@ public class ConnectionQuicConnectMixin {
 
         if (!QuicDirectConnectorFactory.isOperational()) {
             QuicDirectRouteContext.clear();
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC direct connector is not operational. fallback to TCP connect path.");
+            NatTraversalMod.LOGGER.info("[nat-traversal-mod] QUIC direct connector is not operational. fallback to TCP connect path.");
             return;
         }
 
         Optional<QuicDirectRouteContext.PendingRoute> pendingRoute = QuicDirectRouteContext.takeIfMatches(address);
         if (pendingRoute.isEmpty()) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] No pending QUIC direct route for this target. fallback to TCP connect path.");
+            NatTraversalMod.LOGGER.info("[nat-traversal-mod] No pending QUIC direct route for this target. fallback to TCP connect path.");
             return;
         }
 
         String attemptId = pendingRoute.get().attemptId();
         Optional<ChannelFuture> quicFuture = QuicDirectConnectorFactory.connect(address, useEpoll, connection, attemptId);
         if (quicFuture.isPresent()) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] Direct QUIC connect path selected. attempt_id='{}', target='{}:{}'",
                     attemptId,
                     address.getHostString(),
@@ -52,14 +52,14 @@ public class ConnectionQuicConnectMixin {
             return;
         }
 
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Direct QUIC connect failed. try relay fallback first.");
+        NatTraversalMod.LOGGER.info("[nat-traversal-mod] Direct QUIC connect failed. try relay fallback first.");
         if (natTraversalMod$tryRelayFallback(useEpoll, connection, cir)) {
             return;
         }
 
         Optional<InetSocketAddress> fallbackTarget = natTraversalMod$resolveTcpFallbackTarget(pendingRoute.get());
         if (fallbackTarget.isPresent()) {
-            Nat_traversal_mod.LOGGER.info(
+            NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC direct failed. fallback to original TCP target='{}:{}'",
                     fallbackTarget.get().getHostString(),
                     fallbackTarget.get().getPort()
@@ -68,7 +68,7 @@ public class ConnectionQuicConnectMixin {
             return;
         }
 
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Relay fallback unavailable. fallback to TCP connect path.");
+        NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay fallback unavailable. fallback to TCP connect path.");
     }
 
     @Unique
@@ -86,13 +86,13 @@ public class ConnectionQuicConnectMixin {
     @Unique
     private static boolean natTraversalMod$tryRelayFallback(boolean useEpoll, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
         if (!RelayClientConnectorManager.ensureStarted()) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Relay fallback is unavailable: local relay client connector is not ready.");
+            NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay fallback is unavailable: local relay client connector is not ready.");
             return false;
         }
 
         int relayPort = Config.relayClientLocalPort();
         InetSocketAddress relayTarget = new InetSocketAddress("127.0.0.1", relayPort);
-        Nat_traversal_mod.LOGGER.info(
+        NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] QUIC fallback route selected: relay connector target='{}:{}'",
                 relayTarget.getHostString(),
                 relayTarget.getPort()
@@ -102,4 +102,5 @@ public class ConnectionQuicConnectMixin {
         return true;
     }
 }
+
 
