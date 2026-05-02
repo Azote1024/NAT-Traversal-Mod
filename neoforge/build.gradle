@@ -83,14 +83,27 @@ tasks.withType(JavaExec).configureEach {
     classpath += files(quicClassesJar, quicNativeWinJar, quicNativeLinuxX64Jar, quicNativeLinuxArm64Jar)
 }
 
-tasks.register("unpackQuicClasses", Copy) {
-    from(zipTree(quicClassesJar))
-    include "io/netty/incubator/codec/quic/**"
-    into layout.buildDirectory.dir("classes/java/main")
-}
+def quicRuntimeJarPaths = [quicClassesJar, quicNativeWinJar, quicNativeLinuxX64Jar, quicNativeLinuxArm64Jar]
+        .collect { it.absolutePath }
+def serverLegacyClasspathPath = file("$buildDir/moddev/serverLegacyClasspath.txt").absolutePath
 
-tasks.named("classes") {
-    dependsOn("unpackQuicClasses")
+tasks.matching { it.name == "writeServerLegacyClasspath" }.configureEach {
+    doLast {
+        File legacyClasspathFile = new File(serverLegacyClasspathPath)
+        if (!legacyClasspathFile.exists()) {
+            return
+        }
+
+        List<String> existingLines = legacyClasspathFile.readLines("UTF-8")
+        Set<String> existing = new LinkedHashSet<>(existingLines)
+        List<String> missing = quicRuntimeJarPaths.findAll { !existing.contains(it) }
+        if (missing.isEmpty()) {
+            return
+        }
+
+        String prefix = existingLines.isEmpty() ? "" : System.lineSeparator()
+        legacyClasspathFile << prefix + missing.join(System.lineSeparator()) + System.lineSeparator()
+    }
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {

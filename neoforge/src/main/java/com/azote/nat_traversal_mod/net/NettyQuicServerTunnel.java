@@ -14,12 +14,19 @@ import io.netty.incubator.codec.quic.QuicCongestionControlAlgorithm;
 import io.netty.incubator.codec.quic.QuicServerCodecBuilder;
 import io.netty.incubator.codec.quic.QuicSslContextBuilder;
 import io.netty.incubator.codec.quic.QuicStreamChannel;
+import net.neoforged.fml.loading.FMLPaths;
 
 import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -43,10 +50,14 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             return;
         }
 
-        File certFile = new File(Config.quicTlsCertFile());
-        File keyFile = new File(Config.quicTlsKeyFile());
+        File certFile = resolveTlsFile(Config.quicTlsCertFile());
+        File keyFile = resolveTlsFile(Config.quicTlsKeyFile());
         if (!certFile.isFile() || !keyFile.isFile()) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC server tunnel disabled: TLS cert/key file is missing.");
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] QUIC server tunnel disabled: TLS cert/key file is missing. cert='{}', key='{}'",
+                    Config.quicTlsCertFile(),
+                    Config.quicTlsKeyFile()
+            );
             return;
         }
 
@@ -92,7 +103,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
                     bindTarget.port(),
                     targetServerPort
             );
-        } catch (RuntimeException exception) {
+        } catch (Throwable exception) {
             Nat_traversal_mod.LOGGER.warn("[nat-traversal-mod] QUIC server tunnel start failed.", exception);
             SupabaseQuicSessionClient.markHostPunchDown(Config.roomName());
             stop();
@@ -140,6 +151,51 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             RelayIoBridge.closeQuietly(localSocket);
             streamChannel.close().syncUninterruptibly();
         }
+    }
+
+    private static File resolveTlsFile(String configuredPath) {
+        String trimmed = configuredPath == null ? "" : configuredPath.trim();
+        if (trimmed.isEmpty()) {
+            return new File("");
+        }
+
+        Path rawPath = Path.of(trimmed);
+        if (rawPath.isAbsolute()) {
+            return rawPath.toFile();
+        }
+
+        Set<Path> candidates = new LinkedHashSet<>();
+        Path userDir = Path.of(System.getProperty("user.dir", "."));
+        Path gameDir = FMLPaths.GAMEDIR.get();
+        candidates.add(userDir.resolve(rawPath));
+        candidates.add(gameDir.resolve(rawPath));
+
+        Path runStripped = stripRunPrefix(rawPath);
+        if (runStripped != null) {
+            candidates.add(userDir.resolve(runStripped));
+            candidates.add(gameDir.resolve(runStripped));
+        }
+
+        for (Path candidate : candidates) {
+            if (Files.isRegularFile(candidate)) {
+                return candidate.toFile();
+            }
+        }
+
+        List<Path> attempted = new ArrayList<>(candidates);
+        Nat_traversal_mod.LOGGER.debug("[nat-traversal-mod] TLS path candidates checked: {}", attempted);
+        return userDir.resolve(rawPath).toFile();
+    }
+
+    private static Path stripRunPrefix(Path path) {
+        if (path.getNameCount() < 2) {
+            return null;
+        }
+        String first = path.getName(0).toString();
+        if (!"run".equalsIgnoreCase(first)) {
+            return null;
+        }
+        return path.subpath(1, path.getNameCount());
     }
 }
 
