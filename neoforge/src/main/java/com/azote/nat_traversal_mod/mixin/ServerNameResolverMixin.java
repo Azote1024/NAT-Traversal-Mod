@@ -68,7 +68,8 @@ public class ServerNameResolverMixin {
         );
 
         // Keep pending direct-route context synchronized with the actual resolved address.
-        QuicDirectRouteContext.set(new RelayEndpoint(connectHost, target.hostPort()));
+        String attemptId = QuicDirectRouteContext.currentAttemptId().orElse("");
+        QuicDirectRouteContext.set(new RelayEndpoint(connectHost, target.hostPort()), attemptId);
 
         natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + connectHost + ":" + target.hostPort());
         cir.setReturnValue(Optional.of(resolvedAddress));

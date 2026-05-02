@@ -6,26 +6,38 @@ import java.net.UnknownHostException;
 import java.util.Optional;
 
 public final class QuicDirectRouteContext {
-    private static final ThreadLocal<RelayEndpoint> PENDING_ENDPOINT = new ThreadLocal<>();
+    private static final ThreadLocal<PendingRoute> PENDING_ROUTE = new ThreadLocal<>();
+
+    public record PendingRoute(RelayEndpoint endpoint, String attemptId) {
+    }
 
     private QuicDirectRouteContext() {
     }
 
-    public static void set(RelayEndpoint endpoint) {
-        PENDING_ENDPOINT.set(endpoint);
+    public static void set(RelayEndpoint endpoint, String attemptId) {
+        String normalizedAttemptId = attemptId == null ? "" : attemptId;
+        PENDING_ROUTE.set(new PendingRoute(endpoint, normalizedAttemptId));
     }
 
-    public static Optional<RelayEndpoint> takeIfMatches(InetSocketAddress address) {
-        RelayEndpoint endpoint = PENDING_ENDPOINT.get();
-        PENDING_ENDPOINT.remove();
-        if (endpoint == null) {
+    public static Optional<PendingRoute> takeIfMatches(InetSocketAddress address) {
+        PendingRoute route = PENDING_ROUTE.get();
+        PENDING_ROUTE.remove();
+        if (route == null) {
             return Optional.empty();
         }
 
-        if (!isMatch(endpoint, address)) {
+        if (!isMatch(route.endpoint(), address)) {
             return Optional.empty();
         }
-        return Optional.of(endpoint);
+        return Optional.of(route);
+    }
+
+    public static Optional<String> currentAttemptId() {
+        PendingRoute route = PENDING_ROUTE.get();
+        if (route == null || route.attemptId().isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(route.attemptId());
     }
 
     private static boolean isMatch(RelayEndpoint endpoint, InetSocketAddress address) {
@@ -61,7 +73,7 @@ public final class QuicDirectRouteContext {
     }
 
     public static void clear() {
-        PENDING_ENDPOINT.remove();
+        PENDING_ROUTE.remove();
     }
 }
 

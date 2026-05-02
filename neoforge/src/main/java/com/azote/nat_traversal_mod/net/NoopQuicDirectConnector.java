@@ -13,7 +13,7 @@ final class NoopQuicDirectConnector implements QuicDirectConnector {
     }
 
     @Override
-    public Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection) {
+    public Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection, String attemptId) {
         return Optional.empty();
     }
 }

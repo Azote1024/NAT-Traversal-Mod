@@ -9,6 +9,6 @@ import java.util.Optional;
 interface QuicDirectConnector {
     boolean isOperational();
 
-    Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection);
+    Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection, String attemptId);
 }
 

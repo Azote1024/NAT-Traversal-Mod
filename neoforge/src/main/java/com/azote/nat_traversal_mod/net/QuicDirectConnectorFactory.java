@@ -18,8 +18,8 @@ public final class QuicDirectConnectorFactory {
         return CONNECTOR.isOperational();
     }
 
-    public static Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection) {
-        return CONNECTOR.connect(address, useEpoll, connection);
+    public static Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection, String attemptId) {
+        return CONNECTOR.connect(address, useEpoll, connection, attemptId);
     }
 
     private static QuicDirectConnector createInternal() {

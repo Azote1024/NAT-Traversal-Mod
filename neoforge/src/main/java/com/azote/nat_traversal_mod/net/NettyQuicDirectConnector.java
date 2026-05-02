@@ -3,6 +3,7 @@ package com.azote.nat_traversal_mod.net;
 import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
@@ -18,10 +19,12 @@ import io.netty.incubator.codec.quic.QuicStreamChannel;
 import io.netty.incubator.codec.quic.QuicStreamType;
 import io.netty.handler.ssl.util.FingerprintTrustManagerFactory;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.channel.socket.DatagramPacket;
 import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.PacketFlow;
 
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -35,7 +38,9 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
     }
 
     @Override
-    public Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection) {
+    public Optional<ChannelFuture> connect(InetSocketAddress address, boolean useEpoll, Connection connection, String attemptId) {
+        String roomName = Config.roomName();
+        String normalizedAttemptId = attemptId == null ? "" : attemptId;
         boolean useNativeEpoll = Epoll.isAvailable() && useEpoll;
         EventLoopGroup ioGroup = useNativeEpoll ? Connection.NETWORK_EPOLL_WORKER_GROUP.get() : Connection.NETWORK_WORKER_GROUP.get();
 
@@ -58,13 +63,32 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 .syncUninterruptibly()
                 .channel();
 
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] quic_direct phase=dial_start room_name='{}' attempt_id='{}' target='{}:{}' epoll={} tls_mode='{}'",
+                roomName,
+                normalizedAttemptId,
+                address.getHostString(),
+                address.getPort(),
+                useNativeEpoll,
+                Config.quicTlsMode()
+        );
+
+        sendPreConnectPunch(udpChannel, address, roomName, normalizedAttemptId);
+
         io.netty.util.concurrent.Future<QuicChannel> quicConnectFuture = QuicChannel.newBootstrap(udpChannel)
                 .streamHandler(new ChannelInboundHandlerAdapter())
                 .remoteAddress(address)
                 .connect();
 
         if (!quicConnectFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !quicConnectFuture.isSuccess()) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC channel connect failed. target='{}:{}'", address.getHostString(), address.getPort(), quicConnectFuture.cause());
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] quic_direct phase=channel_connect_failed room_name='{}' attempt_id='{}' target='{}:{}'",
+                    roomName,
+                    normalizedAttemptId,
+                    address.getHostString(),
+                    address.getPort(),
+                    quicConnectFuture.cause()
+            );
             udpChannel.close().syncUninterruptibly();
             return Optional.empty();
         }
@@ -85,7 +109,14 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         });
 
         if (!streamFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !streamFuture.isSuccess()) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] QUIC stream create failed. target='{}:{}'", address.getHostString(), address.getPort(), streamFuture.cause());
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] quic_direct phase=stream_create_failed room_name='{}' attempt_id='{}' target='{}:{}'",
+                    roomName,
+                    normalizedAttemptId,
+                    address.getHostString(),
+                    address.getPort(),
+                    streamFuture.cause()
+            );
             quicChannel.close().syncUninterruptibly();
             udpChannel.close().syncUninterruptibly();
             return Optional.empty();
@@ -99,7 +130,32 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
             return Optional.empty();
         }
 
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] quic_direct phase=stream_ready room_name='{}' attempt_id='{}' target='{}:{}'",
+                roomName,
+                normalizedAttemptId,
+                address.getHostString(),
+                address.getPort()
+        );
+
         return Optional.of(stream.newSucceededFuture());
+    }
+
+    private static void sendPreConnectPunch(io.netty.channel.Channel udpChannel, InetSocketAddress address, String roomName, String attemptId) {
+        String payload = "NAT-PUNCH " + Config.roomName() + " " + attemptId + " preconnect";
+        byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+        for (int i = 0; i < 3; i++) {
+            DatagramPacket packet = new DatagramPacket(Unpooled.wrappedBuffer(bytes), address);
+            udpChannel.writeAndFlush(packet).syncUninterruptibly();
+        }
+
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] quic_direct phase=pre_punch_sent room_name='{}' attempt_id='{}' target='{}:{}' count=3",
+                roomName,
+                attemptId,
+                address.getHostString(),
+                address.getPort()
+        );
     }
 
     private static void applyClientTlsMode(QuicSslContextBuilder sslBuilder) {

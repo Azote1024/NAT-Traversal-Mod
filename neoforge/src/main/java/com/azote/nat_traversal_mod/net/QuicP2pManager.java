@@ -3,6 +3,7 @@ package com.azote.nat_traversal_mod.net;
 import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -130,15 +131,18 @@ public final class QuicP2pManager {
             return Optional.empty();
         }
         RelayEndpoint quicEndpoint = parsedEndpoint.get();
+        String attemptId = UUID.randomUUID().toString();
+        SupabaseQuicSessionClient.markClientAttemptStarted(roomName, attemptId);
 
-        prepareHolePunch(roomBody, roomName, quicEndpoint);
+        prepareHolePunch(roomBody, roomName, quicEndpoint, attemptId);
 
         if (QuicDirectConnectorFactory.isOperational()) {
-            QuicDirectRouteContext.set(quicEndpoint);
+            QuicDirectRouteContext.set(quicEndpoint, attemptId);
             logState(roomName, QuicRouteState.ESTABLISHED, "direct connector prepared");
             Nat_traversal_mod.LOGGER.info(
-                    "[nat-traversal-mod] QUIC direct route prepared. room_name='{}', endpoint='{}:{}'",
+                    "[nat-traversal-mod] QUIC direct route prepared. room_name='{}', attempt_id='{}', endpoint='{}:{}'",
                     roomName,
+                    attemptId,
                     quicEndpoint.host(),
                     quicEndpoint.port()
             );
@@ -192,9 +196,9 @@ public final class QuicP2pManager {
         return Optional.empty();
     }
 
-    private static void prepareHolePunch(String roomBody, String roomName, RelayEndpoint quicEndpoint) {
+    private static void prepareHolePunch(String roomBody, String roomName, RelayEndpoint quicEndpoint, String attemptId) {
         Optional<String> punchStatusValue = findFirst(PUNCH_STATUS_PATTERN, roomBody).map(String::trim);
-        if (punchStatusValue.isEmpty() || !"ready".equalsIgnoreCase(punchStatusValue.get())) {
+        if (punchStatusValue.isEmpty() || !shouldSendPunch(punchStatusValue.get())) {
             return;
         }
 
@@ -208,14 +212,22 @@ public final class QuicP2pManager {
         String punchToken = findFirst(PUNCH_TOKEN_PATTERN, roomBody).orElse("");
         boolean punched = UdpHolePunchClient.oneShotPunch(punchEndpoint.get(), roomName, punchToken, 3, 120);
         if (punched) {
-            SupabaseQuicSessionClient.markClientPunchSent(roomName);
+            SupabaseQuicSessionClient.markClientPunchSent(roomName, attemptId);
             Nat_traversal_mod.LOGGER.info(
-                    "[nat-traversal-mod] One-shot UDP hole punch sent. room_name='{}', endpoint='{}:{}'",
+                    "[nat-traversal-mod] One-shot UDP hole punch sent. room_name='{}', attempt_id='{}', endpoint='{}:{}'",
                     roomName,
+                    attemptId,
                     punchEndpoint.get().host(),
                     punchEndpoint.get().port()
             );
         }
+    }
+
+    private static boolean shouldSendPunch(String punchStatus) {
+        String status = punchStatus == null ? "" : punchStatus.trim().toLowerCase();
+        return "ready".equals(status)
+                || "probing".equals(status)
+                || "client_probe_sent".equals(status);
     }
 
     private static Optional<String> findFirst(Pattern pattern, String text) {

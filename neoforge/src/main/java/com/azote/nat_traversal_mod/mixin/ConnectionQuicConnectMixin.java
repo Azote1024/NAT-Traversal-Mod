@@ -33,14 +33,21 @@ public class ConnectionQuicConnectMixin {
             return;
         }
 
-        if (QuicDirectRouteContext.takeIfMatches(address).isEmpty()) {
+        Optional<QuicDirectRouteContext.PendingRoute> pendingRoute = QuicDirectRouteContext.takeIfMatches(address);
+        if (pendingRoute.isEmpty()) {
             Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] No pending QUIC direct route for this target. fallback to TCP connect path.");
             return;
         }
 
-        Optional<ChannelFuture> quicFuture = QuicDirectConnectorFactory.connect(address, useEpoll, connection);
+        String attemptId = pendingRoute.get().attemptId();
+        Optional<ChannelFuture> quicFuture = QuicDirectConnectorFactory.connect(address, useEpoll, connection, attemptId);
         if (quicFuture.isPresent()) {
-            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Direct QUIC connect path selected. target='{}:{}'", address.getHostString(), address.getPort());
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] Direct QUIC connect path selected. attempt_id='{}', target='{}:{}'",
+                    attemptId,
+                    address.getHostString(),
+                    address.getPort()
+            );
             cir.setReturnValue(quicFuture.get());
             return;
         }
