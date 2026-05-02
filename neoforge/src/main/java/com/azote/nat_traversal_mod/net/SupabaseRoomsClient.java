@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,6 +29,7 @@ public final class SupabaseRoomsClient {
     private static final Pattern PUBLIC_ENDPOINT_PATTERN = Pattern.compile("\"public_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern RELAY_ENDPOINT_PATTERN = Pattern.compile("\"relay_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern RELAY_STATUS_PATTERN = Pattern.compile("\"relay_status\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern HOST_NAT_TYPE_PATTERN = Pattern.compile("\"host_nat_type\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern UPDATED_AT_PATTERN = Pattern.compile("\"updated_at\"\\s*:\\s*\"([^\"]+)\"");
     private static final long ROOM_FRESHNESS_TTL_MILLIS = 180_000L;
 
@@ -55,7 +57,7 @@ public final class SupabaseRoomsClient {
         }
 
         String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,public_endpoint,relay_endpoint,relay_status,candidates,updated_at"
+        String endpoint = supabaseUrl + "/rest/v1/rooms?select=host_ip,host_port,public_endpoint,relay_endpoint,relay_status,host_nat_type,candidates,updated_at"
                 + "&room_name=eq." + encodedRoomName
                 + "&status=eq.open";
 
@@ -177,18 +179,54 @@ public final class SupabaseRoomsClient {
             );
         }
 
+        String hostNatType = extractNatType(body);
+
         if (Config.quicFirstMode()) {
-            Optional<String> quicSessionBody = SupabaseQuicSessionClient.fetchSessionBody(roomName);
-            if (quicSessionBody.isPresent()) {
-                Optional<ResolvedTarget> quicSessionTarget = QuicP2pManager.tryResolveFromSessionBody(quicSessionBody.get(), roomName);
-                if (quicSessionTarget.isPresent()) {
-                    return quicSessionTarget;
+            if ("symmetric".equals(hostNatType)) {
+                String forcedAttemptId = UUID.randomUUID().toString();
+                SupabaseQuicSessionClient.markClientAttemptStarted(roomName, forcedAttemptId);
+                Nat_traversal_mod.LOGGER.info(
+                        "[nat-traversal-mod] host_nat_type=symmetric. skip QUIC and force relay-first path. room_name='{}'.",
+                        roomName
+                );
+                SupabaseQuicSessionClient.markRouteDecision(roomName, "relay_forced", "host_symmetric_nat");
+                SupabaseQuicSessionClient.upsertPeerAttempt(
+                        roomName,
+                        QuicP2pManager.clientKey(),
+                        forcedAttemptId,
+                        "symmetric",
+                        "relay_forced",
+                        "idle",
+                        "host_symmetric_nat",
+                        true
+                );
+
+                Optional<ResolvedTarget> relayEndpointTarget = parseRelayEndpoint(body, roomName);
+                if (relayEndpointTarget.isPresent()) {
+                    return relayEndpointTarget;
                 }
+
+                Nat_traversal_mod.LOGGER.warn(
+                        "[nat-traversal-mod] relay_forced by symmetric NAT but relay endpoint unavailable. room_name='{}'. Continue fallback chain.",
+                        roomName
+                );
+            } else {
+                SupabaseQuicSessionClient.markRouteDecision(roomName, "quic_try", "");
             }
 
-            Optional<ResolvedTarget> quicTarget = QuicP2pManager.tryResolveFromRoom(body, roomName);
-            if (quicTarget.isPresent()) {
-                return quicTarget;
+            if (!"symmetric".equals(hostNatType)) {
+                Optional<String> quicSessionBody = SupabaseQuicSessionClient.fetchSessionBody(roomName);
+                if (quicSessionBody.isPresent()) {
+                    Optional<ResolvedTarget> quicSessionTarget = QuicP2pManager.tryResolveFromSessionBody(quicSessionBody.get(), roomName);
+                    if (quicSessionTarget.isPresent()) {
+                        return quicSessionTarget;
+                    }
+                }
+
+                Optional<ResolvedTarget> quicTarget = QuicP2pManager.tryResolveFromRoom(body, roomName);
+                if (quicTarget.isPresent()) {
+                    return quicTarget;
+                }
             }
 
             Nat_traversal_mod.LOGGER.info(
@@ -240,6 +278,19 @@ public final class SupabaseRoomsClient {
         }
 
         return Optional.of(new ResolvedTarget(hostIp, hostPort));
+    }
+
+    private static String extractNatType(String body) {
+        Matcher matcher = HOST_NAT_TYPE_PATTERN.matcher(body);
+        if (!matcher.find()) {
+            return "unknown";
+        }
+
+        String natType = matcher.group(1).trim().toLowerCase();
+        if (natType.equals("open") || natType.equals("port_restricted") || natType.equals("symmetric")) {
+            return natType;
+        }
+        return "unknown";
     }
 
     private static Optional<ResolvedTarget> parseRelayEndpoint(String body, String roomName) {

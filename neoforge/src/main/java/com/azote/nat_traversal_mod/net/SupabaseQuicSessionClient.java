@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 
 final class SupabaseQuicSessionClient {
 	private static final Pattern ATTEMPT_ID_PATTERN = Pattern.compile("\"attempt_id\"\\s*:\\s*\"([^\"]*)\"");
+	private static volatile boolean peerAttemptsUnavailableLogged;
 	private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
 			.connectTimeout(Duration.ofSeconds(3))
 			.build();
@@ -33,29 +34,28 @@ final class SupabaseQuicSessionClient {
 		}
 
 		String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-		String endpoint = supabaseUrl
-				+ "/rest/v1/quic_sessions?select=room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_probe_sent_at,attempt_id,last_error_code,status,updated_at"
-				+ "&room_name=eq." + encodedRoomName
-				+ "&status=eq.open";
-
-		HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-				.timeout(Duration.ofSeconds(4))
-				.header("apikey", supabaseKey)
-				.header("Accept", "application/json")
-				.GET()
-				.build();
 
 		try {
-			HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				Nat_traversal_mod.LOGGER.info(
-						"[nat-traversal-mod] QUIC session query failed. status={}, room_name='{}'.",
-						response.statusCode(),
-						roomName
-				);
-				return Optional.empty();
+			Optional<String> richBody = fetchSessionBodyOnce(
+					supabaseUrl,
+					supabaseKey,
+					encodedRoomName,
+					"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_probe_sent_at,attempt_id,last_error_code,host_nat_type,route_decision,relay_reason,status,updated_at",
+					roomName,
+					false
+			);
+			if (richBody.isPresent()) {
+				return richBody;
 			}
-			return Optional.of(response.body());
+
+			return fetchSessionBodyOnce(
+					supabaseUrl,
+					supabaseKey,
+					encodedRoomName,
+					"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_nat_type,route_decision,relay_reason,status,updated_at",
+					roomName,
+					true
+			);
 		} catch (IOException | InterruptedException exception) {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
@@ -67,6 +67,47 @@ final class SupabaseQuicSessionClient {
 			);
 			return Optional.empty();
 		}
+	}
+
+	private static Optional<String> fetchSessionBodyOnce(
+			String supabaseUrl,
+			String supabaseKey,
+			String encodedRoomName,
+			String selectColumns,
+			String roomName,
+			boolean fallbackMode
+	) throws IOException, InterruptedException {
+		String endpoint = supabaseUrl
+				+ "/rest/v1/quic_sessions?select=" + selectColumns
+				+ "&room_name=eq." + encodedRoomName
+				+ "&status=eq.open";
+
+		HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+				.timeout(Duration.ofSeconds(4))
+				.header("apikey", supabaseKey)
+				.header("Accept", "application/json")
+				.GET()
+				.build();
+
+		HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+		if (response.statusCode() >= 200 && response.statusCode() < 300) {
+			return Optional.of(response.body());
+		}
+
+		if (!fallbackMode && response.statusCode() == 400) {
+			Nat_traversal_mod.LOGGER.info(
+					"[nat-traversal-mod] QUIC session query schema mismatch. retry with legacy select. room_name='{}'",
+					roomName
+			);
+			return Optional.empty();
+		}
+
+		Nat_traversal_mod.LOGGER.info(
+				"[nat-traversal-mod] QUIC session query failed. status={}, room_name='{}'.",
+				response.statusCode(),
+				roomName
+		);
+		return Optional.empty();
 	}
 
 	static Optional<String> fetchCurrentAttemptId(String roomName) {
@@ -117,6 +158,95 @@ final class SupabaseQuicSessionClient {
 				+ "\"punch_status\":\"down\","
 				+ "\"last_error_code\":\"" + jsonEscape(normalizedErrorCode) + "\""
 				+ "}", "Failed to mark host punch down");
+	}
+
+	static void markRouteDecision(String roomName, String routeDecision, String relayReason) {
+		patchSession(roomName, "{"
+				+ "\"route_decision\":\"" + jsonEscape(routeDecision == null ? "" : routeDecision) + "\","
+				+ "\"relay_reason\":\"" + jsonEscape(relayReason == null ? "" : relayReason) + "\","
+				+ "\"route_decided_at\":\"" + Instant.now() + "\""
+				+ "}", "Failed to mark route decision");
+	}
+
+	static void upsertPeerAttempt(
+			String roomName,
+			String clientKey,
+			String attemptId,
+			String clientNatType,
+			String decision,
+			String punchStatus,
+			String lastErrorCode,
+			boolean closed
+	) {
+		String supabaseUrl = Config.supabaseUrl();
+		String supabaseKey = Config.supabaseKey();
+		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank() || clientKey.isBlank() || attemptId.isBlank()) {
+			return;
+		}
+
+		String endpoint = supabaseUrl + "/rest/v1/quic_peer_attempts";
+		String now = Instant.now().toString();
+		String body = "{"
+				+ "\"room_name\":\"" + jsonEscape(roomName) + "\","
+				+ "\"client_key\":\"" + jsonEscape(clientKey) + "\","
+				+ "\"attempt_id\":\"" + jsonEscape(attemptId) + "\","
+				+ "\"client_nat_type\":\"" + jsonEscape(normalizeNatType(clientNatType)) + "\","
+				+ "\"decision\":\"" + jsonEscape(decision == null ? "" : decision) + "\","
+				+ "\"punch_status\":\"" + jsonEscape(punchStatus == null ? "" : punchStatus) + "\","
+				+ "\"last_error_code\":\"" + jsonEscape(lastErrorCode == null ? "" : lastErrorCode) + "\","
+				+ "\"updated_at\":\"" + now + "\""
+				+ (closed ? ",\"closed_at\":\"" + now + "\"" : "")
+				+ "}";
+
+		HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+				.timeout(Duration.ofSeconds(4))
+				.header("apikey", supabaseKey)
+				.header("Content-Type", "application/json")
+				.header("Prefer", "resolution=merge-duplicates,return=minimal")
+				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+				.build();
+
+		try {
+			HttpResponse<Void> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.discarding());
+			int status = response.statusCode();
+			if (status >= 200 && status < 300) {
+				return;
+			}
+
+			if ((status == 400 || status == 404) && !peerAttemptsUnavailableLogged) {
+				peerAttemptsUnavailableLogged = true;
+				Nat_traversal_mod.LOGGER.info(
+						"[nat-traversal-mod] quic_peer_attempts endpoint unavailable. status={}",
+						status
+				);
+				return;
+			}
+
+			Nat_traversal_mod.LOGGER.info(
+					"[nat-traversal-mod] quic_peer_attempts upsert failed. status={}, room_name='{}', attempt_id='{}'",
+					status,
+					roomName,
+					attemptId
+			);
+		} catch (IOException | InterruptedException exception) {
+			if (exception instanceof InterruptedException) {
+				Thread.currentThread().interrupt();
+			}
+			Nat_traversal_mod.LOGGER.info(
+					"[nat-traversal-mod] quic_peer_attempts upsert exception. room_name='{}', attempt_id='{}'",
+					roomName,
+					attemptId,
+					exception
+			);
+		}
+	}
+
+	private static String normalizeNatType(String natType) {
+		String normalized = natType == null ? "" : natType.trim().toLowerCase();
+		if (normalized.equals("open") || normalized.equals("port_restricted") || normalized.equals("symmetric")) {
+			return normalized;
+		}
+		return "unknown";
 	}
 
 	private static Optional<String> extractAttemptId(String responseBody) {

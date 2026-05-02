@@ -57,7 +57,30 @@ public class ConnectionQuicConnectMixin {
             return;
         }
 
+        Optional<InetSocketAddress> fallbackTarget = natTraversalMod$resolveTcpFallbackTarget(pendingRoute.get());
+        if (fallbackTarget.isPresent()) {
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] QUIC direct failed. fallback to original TCP target='{}:{}'",
+                    fallbackTarget.get().getHostString(),
+                    fallbackTarget.get().getPort()
+            );
+            cir.setReturnValue(Connection.connect(fallbackTarget.get(), useEpoll, connection));
+            return;
+        }
+
         Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Relay fallback unavailable. fallback to TCP connect path.");
+    }
+
+    @Unique
+    private static Optional<InetSocketAddress> natTraversalMod$resolveTcpFallbackTarget(QuicDirectRouteContext.PendingRoute pendingRoute) {
+        InetSocketAddress fallbackTarget = pendingRoute.fallbackTarget();
+        if (fallbackTarget == null) {
+            return Optional.empty();
+        }
+        if (fallbackTarget.getPort() < 1 || fallbackTarget.getPort() > 65535) {
+            return Optional.empty();
+        }
+        return Optional.of(fallbackTarget);
     }
 
     @Unique

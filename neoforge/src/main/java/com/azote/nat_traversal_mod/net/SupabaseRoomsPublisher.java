@@ -33,7 +33,8 @@ public final class SupabaseRoomsPublisher {
 
         String endpoint = config.supabaseUrl + "/rest/v1/rooms";
         String updatedAt = Instant.now().toString();
-        String body = buildOpenRoomBody(config, hostPort, updatedAt);
+        NatClassification natClassification = classifyHostNat(config, hostPort);
+        String body = buildOpenRoomBody(config, hostPort, updatedAt, natClassification);
 
         RequestResult result = sendJsonRequest(
                 endpoint,
@@ -50,7 +51,7 @@ public final class SupabaseRoomsPublisher {
                     config.hostIp,
                     hostPort
             );
-            publishQuicSession(config, hostPort, updatedAt);
+            publishQuicSession(config, hostPort, updatedAt, natClassification);
             return;
         }
 
@@ -147,7 +148,7 @@ public final class SupabaseRoomsPublisher {
         }
     }
 
-    private static String buildOpenRoomBody(PublishConfig config, int hostPort, String updatedAt) {
+    private static String buildOpenRoomBody(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
         return "{" +
                 "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," +
                 "\"host_name\":\"" + jsonEscape(config.hostName) + "\"," +
@@ -155,8 +156,9 @@ public final class SupabaseRoomsPublisher {
                 "\"host_port\":" + hostPort + "," +
                 "\"status\":\"open\"," +
                 "\"updated_at\":\"" + jsonEscape(updatedAt) + "\"" +
+                appendNatRoutingFields(natClassification, updatedAt) +
                 appendRelayFieldsForOpenRoom(config) +
-                appendNatFieldsForOpenRoom(config, hostPort) +
+                appendNatFieldsForOpenRoom(natClassification) +
                 appendCandidatesForOpenRoom(config, hostPort) +
                 "}";
     }
@@ -168,33 +170,19 @@ public final class SupabaseRoomsPublisher {
                 + "\"relay_status\":\"" + jsonEscape(config.relayStatus) + "\"";
     }
 
-    private static String appendNatFieldsForOpenRoom(PublishConfig config, int hostPort) {
-        if (!Config.stunEnabled()) {
-            return "";
-        }
-
-        String directEndpoint = config.hostIp + ":" + hostPort;
-        Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs());
-        String publicEndpoint = stunPublicEndpoint.orElse(directEndpoint);
-
-        if (stunPublicEndpoint.isEmpty()) {
-            Nat_traversal_mod.LOGGER.warn(
-                    "[nat-traversal-mod] STUN endpoint resolve failed. Fallback to direct endpoint='{}'.",
-                    directEndpoint
-            );
-        }
-
-        String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
-
-        Nat_traversal_mod.LOGGER.info(
-                "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",
-                natMethod,
-                publicEndpoint
-        );
-
+    private static String appendNatFieldsForOpenRoom(NatClassification natClassification) {
         return ","
-                + "\"nat_method\":\"" + jsonEscape(natMethod) + "\","
-                + "\"public_endpoint\":\"" + jsonEscape(publicEndpoint) + "\"";
+                + "\"nat_method\":\"" + jsonEscape(natClassification.natMethod()) + "\","
+                + "\"public_endpoint\":\"" + jsonEscape(natClassification.publicEndpoint()) + "\"";
+    }
+
+    private static String appendNatRoutingFields(NatClassification natClassification, String updatedAt) {
+        String routeHint = "symmetric".equals(natClassification.hostNatType()) ? "relay_required" : "quic_preferred";
+        return ","
+                + "\"host_nat_type\":\"" + jsonEscape(natClassification.hostNatType()) + "\","
+                + "\"nat_confidence\":\"" + jsonEscape(natClassification.natConfidence()) + "\","
+                + "\"nat_classified_at\":\"" + jsonEscape(updatedAt) + "\","
+                + "\"route_hint\":\"" + jsonEscape(routeHint) + "\"";
     }
 
     private static String appendCandidatesForOpenRoom(PublishConfig config, int hostPort) {
@@ -254,10 +242,13 @@ public final class SupabaseRoomsPublisher {
         return singleLine.substring(0, 200) + "...";
     }
 
-    private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt) {
+    private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
         String endpoint = config.supabaseUrl + "/rest/v1/quic_sessions";
         String defaultPunchEndpoint = config.hostIp + ":" + hostPort;
         String punchToken = buildPunchToken(config.roomName, updatedAt);
+        boolean relayForced = "symmetric".equals(natClassification.hostNatType());
+        String routeDecision = relayForced ? "relay_forced" : "quic_try";
+        String relayReason = relayForced ? "host_symmetric_nat" : "";
         String body = "{"
                 + "\"room_name\":\"" + jsonEscape(config.roomName) + "\"," 
                 + "\"quic_endpoint\":\"" + jsonEscape(config.quicEndpoint) + "\"," 
@@ -265,6 +256,10 @@ public final class SupabaseRoomsPublisher {
                 + "\"punch_endpoint\":\"" + jsonEscape(defaultPunchEndpoint) + "\"," 
                 + "\"punch_status\":\"ready\","
                 + "\"punch_token\":\"" + jsonEscape(punchToken) + "\","
+                + "\"host_nat_type\":\"" + jsonEscape(natClassification.hostNatType()) + "\","
+                + "\"route_decision\":\"" + jsonEscape(routeDecision) + "\","
+                + "\"route_decided_at\":\"" + jsonEscape(updatedAt) + "\","
+                + "\"relay_reason\":\"" + jsonEscape(relayReason) + "\","
                 + "\"status\":\"open\","
                 + "\"updated_at\":\"" + jsonEscape(updatedAt) + "\""
                 + "}";
@@ -294,6 +289,8 @@ public final class SupabaseRoomsPublisher {
                 + "\"quic_status\":\"down\"," 
                 + "\"punch_status\":\"idle\","
                 + "\"punch_token\":\"\","
+                + "\"route_decision\":\"\","
+                + "\"relay_reason\":\"\","
                 + "\"updated_at\":\"" + jsonEscape(updatedAt) + "\""
                 + "}";
 
@@ -333,5 +330,39 @@ public final class SupabaseRoomsPublisher {
 
     private static String buildPunchToken(String roomName, String updatedAt) {
         return roomName + "-" + updatedAt.replace(":", "").replace("-", "").replace(".", "");
+    }
+
+    private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {
+        String directEndpoint = config.hostIp + ":" + hostPort;
+        if (!Config.stunEnabled()) {
+            return new NatClassification("unknown", "disabled", "direct", directEndpoint);
+        }
+
+        Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(Config.stunServer(), Config.stunTimeoutMs());
+        String publicEndpoint = stunPublicEndpoint.orElse(directEndpoint);
+        if (stunPublicEndpoint.isEmpty()) {
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] STUN endpoint resolve failed. Fallback to direct endpoint='{}'.",
+                    directEndpoint
+            );
+            Nat_traversal_mod.LOGGER.info(
+                    "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",
+                    "direct",
+                    publicEndpoint
+            );
+            return new NatClassification("unknown", "low", "direct", publicEndpoint);
+        }
+
+        String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
+        String hostNatType = publicEndpoint.equals(directEndpoint) ? "open" : "port_restricted";
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",
+                natMethod,
+                publicEndpoint
+        );
+        return new NatClassification(hostNatType, "medium", natMethod, publicEndpoint);
+    }
+
+    private record NatClassification(String hostNatType, String natConfidence, String natMethod, String publicEndpoint) {
     }
 }

@@ -8,15 +8,19 @@ import java.util.Optional;
 public final class QuicDirectRouteContext {
     private static final ThreadLocal<PendingRoute> PENDING_ROUTE = new ThreadLocal<>();
 
-    public record PendingRoute(RelayEndpoint endpoint, String attemptId) {
+    public record PendingRoute(RelayEndpoint endpoint, String attemptId, InetSocketAddress fallbackTarget) {
     }
 
     private QuicDirectRouteContext() {
     }
 
     public static void set(RelayEndpoint endpoint, String attemptId) {
+        set(endpoint, attemptId, null);
+    }
+
+    public static void set(RelayEndpoint endpoint, String attemptId, InetSocketAddress fallbackTarget) {
         String normalizedAttemptId = attemptId == null ? "" : attemptId;
-        PENDING_ROUTE.set(new PendingRoute(endpoint, normalizedAttemptId));
+        PENDING_ROUTE.set(new PendingRoute(endpoint, normalizedAttemptId, fallbackTarget));
     }
 
     public static Optional<PendingRoute> takeIfMatches(InetSocketAddress address) {
