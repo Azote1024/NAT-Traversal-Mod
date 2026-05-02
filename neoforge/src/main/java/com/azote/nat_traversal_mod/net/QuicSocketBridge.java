@@ -36,6 +36,8 @@ final class QuicSocketBridge {
                 ctx.close();
             }
         });
+        // Resume reading only after inbound bridge handler is attached.
+        stream.config().setAutoRead(true);
         Thread writer = new Thread(() -> {
             try (InputStream socketInput = socket.getInputStream()) {
                 byte[] buffer = new byte[8192];

@@ -5,7 +5,6 @@ import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -84,7 +83,12 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
                     .initialMaxStreamDataBidirectionalRemote(MAX_DATA)
                     .congestionControlAlgorithm(QuicCongestionControlAlgorithm.BBR)
                     .tokenHandler(InsecureQuicTokenHandler.INSTANCE)
-                    .handler(new ChannelInboundHandlerAdapter())
+                    .handler(new ChannelInitializer<Channel>() {
+                        @Override
+                        protected void initChannel(Channel channel) {
+                            // No parent-channel handlers required for current tunnel mode.
+                        }
+                    })
                     .streamHandler(new ChannelInitializer<QuicStreamChannel>() {
                         @Override
                         protected void initChannel(QuicStreamChannel streamChannel) {
@@ -219,6 +223,9 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         if (establishedMarked.compareAndSet(false, true)) {
             SupabaseQuicSessionClient.markHostPunchEstablished(Config.roomName());
         }
+
+        // Prevent early stream payload from being dropped before bridge handlers are installed.
+        streamChannel.config().setAutoRead(false);
         Thread thread = new Thread(() -> bridgeStreamToLocalServer(streamChannel), "nat-quic-server-session");
         thread.setDaemon(true);
         thread.start();

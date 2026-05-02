@@ -87,6 +87,61 @@ def quicRuntimeJarPaths = [quicClassesJar, quicNativeWinJar, quicNativeLinuxX64J
         .collect { it.absolutePath }
 def clientLegacyClasspathPath = file("$buildDir/moddev/clientLegacyClasspath.txt").absolutePath
 def serverLegacyClasspathPath = file("$buildDir/moddev/serverLegacyClasspath.txt").absolutePath
+def clientLog4j2Path = file("$buildDir/moddev/clientLog4j2.xml").absolutePath
+def serverLog4j2Path = file("$buildDir/moddev/serverLog4j2.xml").absolutePath
+def quicVerboseLogs = (
+        project.findProperty("natQuicVerboseLogs")?.toString()?.toBoolean()
+                ?: System.getenv("NAT_QUIC_VERBOSE_LOGS")?.toBoolean()
+                ?: false
+)
+
+def quicNoiseLoggerBeginMarker = '<!-- NAT-TRAVERSAL-MOD QUIC-LOG-SUPPRESSION BEGIN -->'
+def quicNoiseLoggerEndMarker = '<!-- NAT-TRAVERSAL-MOD QUIC-LOG-SUPPRESSION END -->'
+def quicNoiseLoggerBlock = '''
+        <!-- NAT-TRAVERSAL-MOD QUIC-LOG-SUPPRESSION BEGIN -->
+        <!-- Reduce QUIC/Netty transport noise in debug.log to keep NAT route diagnostics readable -->
+        <Logger level="warn" name="io.netty.incubator.codec.quic"/>
+        <Logger level="warn" name="io.netty.channel.DefaultChannelPipeline"/>
+        <Logger level="warn" name="io.netty.util.Recycler"/>
+        <!-- NAT-TRAVERSAL-MOD QUIC-LOG-SUPPRESSION END -->
+'''
+
+def removeQuicNoiseBlock = { String text ->
+    int beginIndex = text.indexOf(quicNoiseLoggerBeginMarker)
+    int endIndex = text.indexOf(quicNoiseLoggerEndMarker)
+    if (beginIndex < 0 || endIndex < 0 || endIndex < beginIndex) {
+        return text
+    }
+    int afterEnd = endIndex + quicNoiseLoggerEndMarker.length()
+    return text.substring(0, beginIndex) + text.substring(afterEnd)
+}
+
+def patchModDevLog4j = { String path ->
+    File log4jFile = new File(path)
+    if (!log4jFile.exists()) {
+        return
+    }
+
+    String original = log4jFile.getText('UTF-8')
+    String text = removeQuicNoiseBlock(original)
+
+    if (quicVerboseLogs) {
+        if (text != original) {
+            log4jFile.write(text, 'UTF-8')
+        }
+        return
+    }
+
+    int rootIndex = text.indexOf('<Root level="DEBUG">')
+    if (rootIndex < 0) {
+        return
+    }
+
+    String patched = text.substring(0, rootIndex) + quicNoiseLoggerBlock + text.substring(rootIndex)
+    if (patched != original) {
+        log4jFile.write(patched, 'UTF-8')
+    }
+}
 
 tasks.matching { it.name == "writeClientLegacyClasspath" }.configureEach {
     doLast {
@@ -123,6 +178,30 @@ tasks.matching { it.name == "writeServerLegacyClasspath" }.configureEach {
 
         String prefix = existingLines.isEmpty() ? "" : System.lineSeparator()
         legacyClasspathFile << prefix + missing.join(System.lineSeparator()) + System.lineSeparator()
+    }
+}
+
+tasks.matching { it.name == "prepareClientRun" }.configureEach {
+    doLast {
+        patchModDevLog4j(clientLog4j2Path)
+    }
+}
+
+tasks.matching { it.name == "prepareServerRun" }.configureEach {
+    doLast {
+        patchModDevLog4j(serverLog4j2Path)
+    }
+}
+
+tasks.matching { it.name == "runClient" }.configureEach {
+    doFirst {
+        patchModDevLog4j(clientLog4j2Path)
+    }
+}
+
+tasks.matching { it.name == "runServer" }.configureEach {
+    doFirst {
+        patchModDevLog4j(serverLog4j2Path)
     }
 }
 

@@ -1,11 +1,14 @@
 package com.azote.nat_traversal_mod.mixin;
 
+import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import com.azote.nat_traversal_mod.net.QuicDirectConnectorFactory;
 import com.azote.nat_traversal_mod.net.QuicDirectRouteContext;
+import com.azote.nat_traversal_mod.net.RelayClientConnectorManager;
 import io.netty.channel.ChannelFuture;
 import net.minecraft.network.Connection;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -42,7 +45,31 @@ public class ConnectionQuicConnectMixin {
             return;
         }
 
-        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Direct QUIC connect failed. fallback to TCP connect path.");
+        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Direct QUIC connect failed. try relay fallback first.");
+        if (natTraversalMod$tryRelayFallback(useEpoll, connection, cir)) {
+            return;
+        }
+
+        Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Relay fallback unavailable. fallback to TCP connect path.");
+    }
+
+    @Unique
+    private static boolean natTraversalMod$tryRelayFallback(boolean useEpoll, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
+        if (!RelayClientConnectorManager.ensureStarted()) {
+            Nat_traversal_mod.LOGGER.info("[nat-traversal-mod] Relay fallback is unavailable: local relay client connector is not ready.");
+            return false;
+        }
+
+        int relayPort = Config.relayClientLocalPort();
+        InetSocketAddress relayTarget = new InetSocketAddress("127.0.0.1", relayPort);
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] QUIC fallback route selected: relay connector target='{}:{}'",
+                relayTarget.getHostString(),
+                relayTarget.getPort()
+        );
+
+        cir.setReturnValue(Connection.connect(relayTarget, useEpoll, connection));
+        return true;
     }
 }
 
