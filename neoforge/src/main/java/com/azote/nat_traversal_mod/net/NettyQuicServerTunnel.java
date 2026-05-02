@@ -4,6 +4,7 @@ import com.azote.nat_traversal_mod.Config;
 import com.azote.nat_traversal_mod.Nat_traversal_mod;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
@@ -18,8 +19,13 @@ import net.neoforged.fml.loading.FMLPaths;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.Socket;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -87,13 +93,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
                     })
                     .build();
 
-            udpChannel = new Bootstrap()
-                    .group(eventLoopGroup)
-                    .channel(NioDatagramChannel.class)
-                    .handler(codec)
-                    .bind(new InetSocketAddress(bindTarget.host(), bindTarget.port()))
-                    .syncUninterruptibly()
-                    .channel();
+            udpChannel = bindUdpChannel(codec, bindTarget);
 
             running = true;
             SupabaseQuicSessionClient.markHostPunchProbing(Config.roomName());
@@ -108,6 +108,89 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             SupabaseQuicSessionClient.markHostPunchDown(Config.roomName());
             stop();
         }
+    }
+
+    private Channel bindUdpChannel(ChannelHandler codec, RelayEndpoint bindTarget) {
+        Bootstrap bootstrap = new Bootstrap()
+                .group(eventLoopGroup)
+                .channel(NioDatagramChannel.class)
+                .handler(codec);
+
+        InetSocketAddress requested = new InetSocketAddress(bindTarget.host(), bindTarget.port());
+        InetSocketAddress preferred = preferBindableAddress(requested);
+        Nat_traversal_mod.LOGGER.info(
+                "[nat-traversal-mod] QUIC bind selection: publish='{}:{}', bind='{}:{}'",
+                bindTarget.host(),
+                bindTarget.port(),
+                preferred.getAddress() == null ? preferred.getHostString() : preferred.getAddress().getHostAddress(),
+                preferred.getPort()
+        );
+        try {
+            return bootstrap.bind(preferred).syncUninterruptibly().channel();
+        } catch (RuntimeException exception) {
+            if (!isBindFailure(exception) || isWildcardHost(bindTarget.host())) {
+                throw exception;
+            }
+
+            InetSocketAddress wildcard = new InetSocketAddress("0.0.0.0", bindTarget.port());
+            Nat_traversal_mod.LOGGER.warn(
+                    "[nat-traversal-mod] QUIC bind failed on publish host '{}:{}'; retrying with wildcard '{}:{}'.",
+                    bindTarget.host(),
+                    bindTarget.port(),
+                    wildcard.getAddress() == null ? wildcard.getHostString() : wildcard.getAddress().getHostAddress(),
+                    wildcard.getPort(),
+                    exception
+            );
+            return bootstrap.bind(wildcard).syncUninterruptibly().channel();
+        }
+    }
+
+    private InetSocketAddress preferBindableAddress(InetSocketAddress requested) {
+        String host = requested.getHostString();
+        if (isWildcardHost(host)) {
+            return requested;
+        }
+        if (isLocalInterfaceHost(host)) {
+            return requested;
+        }
+
+        InetSocketAddress wildcard = new InetSocketAddress("0.0.0.0", requested.getPort());
+        Nat_traversal_mod.LOGGER.warn(
+                "[nat-traversal-mod] QUIC publish host '{}:{}' is not assigned locally; binding wildcard '{}:{}' instead.",
+                host,
+                requested.getPort(),
+                wildcard.getAddress() == null ? wildcard.getHostString() : wildcard.getAddress().getHostAddress(),
+                wildcard.getPort()
+        );
+        return wildcard;
+    }
+
+    private static boolean isLocalInterfaceHost(String host) {
+        try {
+            InetAddress address = InetAddress.getByName(host);
+            return NetworkInterface.getByInetAddress(address) != null;
+        } catch (UnknownHostException | SocketException exception) {
+            return false;
+        }
+    }
+
+    private static boolean isBindFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof BindException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase().contains("cannot assign requested address")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static boolean isWildcardHost(String host) {
+        return "0.0.0.0".equals(host) || "::".equals(host) || "[::]".equals(host);
     }
 
     @Override
