@@ -53,16 +53,29 @@ public class ServerNameResolverMixin {
         }
 
         ResolvedTarget target = maybeTarget.get();
-        ResolvedServerAddress resolvedAddress = ResolvedServerAddress.from(new InetSocketAddress(target.hostIp(), target.hostPort()));
+        String connectHost = target.hostIp();
+        if (natTraversalMod$isLoopbackHost(requestedHost)) {
+            // Same-PC runClient mode should avoid public-IP hairpin and connect directly to local QUIC bind.
+            connectHost = "127.0.0.1";
+        }
+        ResolvedServerAddress resolvedAddress = ResolvedServerAddress.from(new InetSocketAddress(connectHost, target.hostPort()));
 
         Nat_traversal_mod.LOGGER.info(
                 "[nat-traversal-mod] Resolved room target. {}:{}",
-                target.hostIp(),
+                connectHost,
                 target.hostPort()
         );
 
-        natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + target.hostIp() + ":" + target.hostPort());
+        natTraversalMod$notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + connectHost + ":" + target.hostPort());
         cir.setReturnValue(Optional.of(resolvedAddress));
+    }
+
+    @Unique
+    private static boolean natTraversalMod$isLoopbackHost(String host) {
+        return "localhost".equalsIgnoreCase(host)
+                || "127.0.0.1".equals(host)
+                || "::1".equals(host)
+                || "[::1]".equals(host);
     }
 
     @Unique

@@ -85,7 +85,27 @@ tasks.withType(JavaExec).configureEach {
 
 def quicRuntimeJarPaths = [quicClassesJar, quicNativeWinJar, quicNativeLinuxX64Jar, quicNativeLinuxArm64Jar]
         .collect { it.absolutePath }
+def clientLegacyClasspathPath = file("$buildDir/moddev/clientLegacyClasspath.txt").absolutePath
 def serverLegacyClasspathPath = file("$buildDir/moddev/serverLegacyClasspath.txt").absolutePath
+
+tasks.matching { it.name == "writeClientLegacyClasspath" }.configureEach {
+    doLast {
+        File legacyClasspathFile = new File(clientLegacyClasspathPath)
+        if (!legacyClasspathFile.exists()) {
+            return
+        }
+
+        List<String> existingLines = legacyClasspathFile.readLines("UTF-8")
+        Set<String> existing = new LinkedHashSet<>(existingLines)
+        List<String> missing = quicRuntimeJarPaths.findAll { !existing.contains(it) }
+        if (missing.isEmpty()) {
+            return
+        }
+
+        String prefix = existingLines.isEmpty() ? "" : System.lineSeparator()
+        legacyClasspathFile << prefix + missing.join(System.lineSeparator()) + System.lineSeparator()
+    }
+}
 
 tasks.matching { it.name == "writeServerLegacyClasspath" }.configureEach {
     doLast {
