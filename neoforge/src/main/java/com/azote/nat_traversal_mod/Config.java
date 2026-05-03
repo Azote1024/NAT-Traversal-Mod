@@ -6,6 +6,13 @@ public class Config {
     private static final int TCP_ATTEMPTS_DEFAULT = 2;
     private static final int QUIC_ATTEMPTS_DEFAULT = 3;
     private static final int QUIC_ATTEMPT_INTERVAL_MS_DEFAULT = 700;
+    private static final int QUIC_BIND_PORT_DEFAULT = 25568;
+    private static final int PUNCH_WINDOW_DELAY_MS_DEFAULT = 600;
+    private static final int PUNCH_WINDOW_MS_DEFAULT = 2200;
+    private static final int PUNCH_HOST_ASSIST_POLL_MS_DEFAULT = 300;
+    private static final int PUNCH_BURST_COUNT_DEFAULT = 3;
+    private static final int PUNCH_BURST_INTERVAL_MS_DEFAULT = 40;
+    private static final int PUNCH_STALE_ATTEMPT_MS_DEFAULT = 30_000;
     private static final int ROUTE_STAGE_RESET_MS_DEFAULT = 30_000;
     private static final ModConfigSpec.Builder COMMON_BUILDER = new ModConfigSpec.Builder();
     private static final ModConfigSpec.Builder SERVER_BUILDER = new ModConfigSpec.Builder();
@@ -76,9 +83,13 @@ public class Config {
             .comment("Relay status: ready or down")
             .define("relay.status", "ready");
 
-    private static final ModConfigSpec.ConfigValue<String> QUIC_PUBLISH_ENDPOINT_VALUE = SERVER_BUILDER
-            .comment("QUIC endpoint written to rooms (publicly reachable host:port)")
-            .define("quic.publish_endpoint", "");
+    private static final ModConfigSpec.ConfigValue<String> QUIC_BIND_HOST_VALUE = SERVER_BUILDER
+            .comment("QUIC UDP bind host. Use the server LAN IP or 0.0.0.0. Blank means 0.0.0.0.")
+            .define("quic.bind_host", "");
+
+    private static final ModConfigSpec.IntValue QUIC_BIND_PORT_VALUE = SERVER_BUILDER
+            .comment("QUIC UDP bind port")
+            .defineInRange("quic.bind_port", QUIC_BIND_PORT_DEFAULT, 1, 65535);
 
     private static final ModConfigSpec.ConfigValue<String> QUIC_STATUS_VALUE = SERVER_BUILDER
             .comment("QUIC status: ready or down")
@@ -115,6 +126,30 @@ public class Config {
     private static final ModConfigSpec.IntValue QUIC_ATTEMPT_INTERVAL_MS_VALUE = CLIENT_BUILDER
             .comment("Delay between QUIC attempts in milliseconds")
             .defineInRange("quic.attempt_interval_ms", QUIC_ATTEMPT_INTERVAL_MS_DEFAULT, 100, 5000);
+
+    private static final ModConfigSpec.IntValue PUNCH_WINDOW_DELAY_MS_VALUE = COMMON_BUILDER
+            .comment("Delay before opening a coordinated UDP punch window in milliseconds")
+            .defineInRange("punch.window_delay_ms", PUNCH_WINDOW_DELAY_MS_DEFAULT, 0, 5000);
+
+    private static final ModConfigSpec.IntValue PUNCH_WINDOW_MS_VALUE = COMMON_BUILDER
+            .comment("Coordinated UDP punch window duration in milliseconds")
+            .defineInRange("punch.window_ms", PUNCH_WINDOW_MS_DEFAULT, 500, 10000);
+
+    private static final ModConfigSpec.IntValue PUNCH_HOST_ASSIST_POLL_MS_VALUE = COMMON_BUILDER
+            .comment("Host-side Supabase polling interval for punch assist in milliseconds")
+            .defineInRange("punch.host_assist_poll_ms", PUNCH_HOST_ASSIST_POLL_MS_DEFAULT, 100, 5000);
+
+    private static final ModConfigSpec.IntValue PUNCH_BURST_COUNT_VALUE = COMMON_BUILDER
+            .comment("UDP punch packets sent per burst")
+            .defineInRange("punch.burst_count", PUNCH_BURST_COUNT_DEFAULT, 1, 10);
+
+    private static final ModConfigSpec.IntValue PUNCH_BURST_INTERVAL_MS_VALUE = COMMON_BUILDER
+            .comment("Delay between UDP punch packets in a burst in milliseconds")
+            .defineInRange("punch.burst_interval_ms", PUNCH_BURST_INTERVAL_MS_DEFAULT, 0, 500);
+
+    private static final ModConfigSpec.IntValue PUNCH_STALE_ATTEMPT_MS_VALUE = COMMON_BUILDER
+            .comment("Ignore peer punch attempts older than this many milliseconds")
+            .defineInRange("punch.stale_attempt_ms", PUNCH_STALE_ATTEMPT_MS_DEFAULT, 1000, 300000);
 
     private static final ModConfigSpec.IntValue ROUTE_STAGE_RESET_MS_VALUE = CLIENT_BUILDER
             .comment("Reset window for tcp_quic_relay stage counters in milliseconds")
@@ -215,8 +250,12 @@ public class Config {
         return getClientBooleanOrDefault(QUIC_ENABLED_VALUE, true);
     }
 
-    public static String quicPublishEndpoint() {
-        return getServerStringOrDefault(QUIC_PUBLISH_ENDPOINT_VALUE, "");
+    public static String quicBindHost() {
+        return getServerStringOrDefault(QUIC_BIND_HOST_VALUE, "");
+    }
+
+    public static int quicBindPort() {
+        return getServerIntOrDefault(QUIC_BIND_PORT_VALUE, QUIC_BIND_PORT_DEFAULT);
     }
 
     public static String quicStatus() {
@@ -255,6 +294,30 @@ public class Config {
         return getClientIntOrDefault(QUIC_ATTEMPT_INTERVAL_MS_VALUE, QUIC_ATTEMPT_INTERVAL_MS_DEFAULT);
     }
 
+    public static int punchWindowDelayMs() {
+        return PUNCH_WINDOW_DELAY_MS_VALUE.get();
+    }
+
+    public static int punchWindowMs() {
+        return PUNCH_WINDOW_MS_VALUE.get();
+    }
+
+    public static int punchHostAssistPollMs() {
+        return PUNCH_HOST_ASSIST_POLL_MS_VALUE.get();
+    }
+
+    public static int punchBurstCount() {
+        return PUNCH_BURST_COUNT_VALUE.get();
+    }
+
+    public static int punchBurstIntervalMs() {
+        return PUNCH_BURST_INTERVAL_MS_VALUE.get();
+    }
+
+    public static int punchStaleAttemptMs() {
+        return PUNCH_STALE_ATTEMPT_MS_VALUE.get();
+    }
+
     public static int routingStageResetMs() {
         return getClientIntOrDefault(ROUTE_STAGE_RESET_MS_VALUE, ROUTE_STAGE_RESET_MS_DEFAULT);
     }
@@ -290,6 +353,15 @@ public class Config {
     private static String getServerStringOrDefault(ModConfigSpec.ConfigValue<String> value, String defaultValue) {
         try {
             return value.get().trim();
+        } catch (IllegalStateException ignored) {
+            // Client-side early connect path can access server-only config values before server config is loaded.
+            return defaultValue;
+        }
+    }
+
+    private static int getServerIntOrDefault(ModConfigSpec.IntValue value, int defaultValue) {
+        try {
+            return value.get();
         } catch (IllegalStateException ignored) {
             // Client-side early connect path can access server-only config values before server config is loaded.
             return defaultValue;

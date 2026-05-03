@@ -86,6 +86,13 @@ public class ConnectionQuicConnectMixin {
                     fallbackDecision.target().getHostString(),
                     fallbackDecision.target().getPort()
             );
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] quic_attempt outcome='relay_rescue' room_name='{}' attempt_id='{}' target='{}:{}'",
+                    runtimeConfig.roomName(),
+                    attemptId,
+                    fallbackDecision.target().getHostString(),
+                    fallbackDecision.target().getPort()
+            );
             cir.setReturnValue(Connection.connect(fallbackDecision.target(), useEpoll, connection));
             return;
         }
@@ -102,12 +109,26 @@ public class ConnectionQuicConnectMixin {
                     fallbackDecision.target().getHostString(),
                     fallbackDecision.target().getPort()
             );
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] quic_attempt outcome='original_tcp_rescue' room_name='{}' attempt_id='{}' target='{}:{}'",
+                    runtimeConfig.roomName(),
+                    attemptId,
+                    fallbackDecision.target().getHostString(),
+                    fallbackDecision.target().getPort()
+            );
             cir.setReturnValue(Connection.connect(fallbackDecision.target(), useEpoll, connection));
             return;
         }
 
         NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] route_result='fallback_unavailable' attempt_id='{}' target='{}:{}'",
+                attemptId,
+                address.getHostString(),
+                address.getPort()
+        );
+        NatTraversalMod.LOGGER.info(
+                "[nat-traversal-mod] quic_attempt outcome='final_fail' room_name='{}' attempt_id='{}' target='{}:{}'",
+                runtimeConfig.roomName(),
                 attemptId,
                 address.getHostString(),
                 address.getPort()

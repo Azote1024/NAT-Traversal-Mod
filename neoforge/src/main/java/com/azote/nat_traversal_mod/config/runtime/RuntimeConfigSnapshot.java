@@ -20,7 +20,8 @@ public record RuntimeConfigSnapshot(
         String stunServer,
         int stunTimeoutMs,
         boolean quicEnabled,
-        String quicPublishEndpoint,
+        String quicBindHost,
+        int quicBindPort,
         String quicStatus,
         QuicTlsMode quicTlsMode,
         String quicTlsCertFile,
@@ -29,6 +30,12 @@ public record RuntimeConfigSnapshot(
         int quicClientLocalPort,
         int quicAttempts,
         int quicAttemptIntervalMs,
+        int punchWindowDelayMs,
+        int punchWindowMs,
+        int punchHostAssistPollMs,
+        int punchBurstCount,
+        int punchBurstIntervalMs,
+        int punchStaleAttemptMs,
         int tcpAttempts,
         int routeStageResetMs
 ) {

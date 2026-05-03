@@ -161,7 +161,7 @@ public final class SupabaseRoomsPublisher {
         String directEndpoint = publishHostIp + ":" + hostPort;
         return new SupabaseJsonObjectBuilder()
                 .addString("direct_endpoint", directEndpoint)
-                .addString("quic_endpoint", config.quicEndpoint)
+                .addString("quic_endpoint", publishedQuicEndpoint(config, publishHostIp))
                 .addString("quic_status", config.quicStatus)
                 .addNumber("quic_attempts", config.quicAttempts)
                 .addNumber("quic_attempt_interval_ms", config.quicAttemptIntervalMs)
@@ -180,7 +180,8 @@ public final class SupabaseRoomsPublisher {
         String relayEndpoint = snapshot.relayEndpoint();
         String relayToken = snapshot.relayToken();
         String relayStatus = snapshot.relayStatus();
-        String quicEndpoint = snapshot.quicEndpoint();
+        String quicBindHost = snapshot.quicBindHost();
+        int quicBindPort = snapshot.quicBindPort();
         String quicStatus = snapshot.quicStatus();
 
         if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
@@ -207,7 +208,8 @@ public final class SupabaseRoomsPublisher {
                 relayEndpoint,
                 relayToken,
                 relayStatus,
-                quicEndpoint,
+                quicBindHost,
+                quicBindPort,
                 quicStatus,
                 snapshot.stunEnabled(),
                 snapshot.stunServer(),
@@ -231,12 +233,13 @@ public final class SupabaseRoomsPublisher {
     private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
         String endpoint = config.supabaseUrl + SupabaseApiPaths.QUIC_SESSIONS;
         String defaultPunchEndpoint = initialQuicPunchEndpoint(config, hostPort, natClassification);
+        String quicEndpoint = publishedQuicEndpoint(config, natClassification.publishHostIp());
         String punchToken = buildPunchToken(config.roomName, updatedAt);
         String routeDecision = "quic_try";
         String relayReason = "";
         String body = new SupabaseJsonObjectBuilder()
                 .addString("room_name", config.roomName)
-                .addString("quic_endpoint", config.quicEndpoint)
+                .addString("quic_endpoint", quicEndpoint)
                 .addString("quic_status", config.quicStatus)
                 .addString("punch_endpoint", defaultPunchEndpoint)
                 .addString("punch_status", "ready")
@@ -305,7 +308,8 @@ public final class SupabaseRoomsPublisher {
             String relayEndpoint,
             String relayToken,
             String relayStatus,
-            String quicEndpoint,
+            String quicBindHost,
+            int quicBindPort,
             String quicStatus,
             boolean stunEnabled,
             String stunServer,
@@ -323,12 +327,13 @@ public final class SupabaseRoomsPublisher {
     }
 
     private static String initialQuicPunchEndpoint(PublishConfig config, int hostPort, NatClassification natClassification) {
-        Optional<RelayEndpoint> quicEndpoint = RelayEndpoint.parse(config.quicEndpoint, "quic.publish_endpoint");
-        if (quicEndpoint.isPresent()) {
-            String host = natClassification.publishHostIp().isBlank()
-                    ? quicEndpoint.get().host()
-                    : natClassification.publishHostIp();
-            return host + ":" + quicEndpoint.get().port();
+        int quicPort = config.quicBindPort;
+        if (quicPort > 0 && !natClassification.publishHostIp().isBlank()) {
+            return natClassification.publishHostIp() + ":" + quicPort;
+        }
+
+        if (quicPort > 0 && !config.quicBindHost.isBlank() && !isWildcardHost(config.quicBindHost)) {
+            return config.quicBindHost + ":" + quicPort;
         }
 
         if (!natClassification.publicEndpoint().isBlank()) {
@@ -336,6 +341,22 @@ public final class SupabaseRoomsPublisher {
         }
 
         return natClassification.publishHostIp() + ":" + hostPort;
+    }
+
+    private static String publishedQuicEndpoint(PublishConfig config, String publishHostIp) {
+        if (publishHostIp != null && !publishHostIp.isBlank()) {
+            return publishHostIp + ":" + config.quicBindPort;
+        }
+
+        if (!config.quicBindHost.isBlank() && !isWildcardHost(config.quicBindHost)) {
+            return config.quicBindHost + ":" + config.quicBindPort;
+        }
+
+        return "";
+    }
+
+    private static boolean isWildcardHost(String host) {
+        return "0.0.0.0".equals(host) || "::".equals(host) || "[::]".equals(host);
     }
 
     private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {

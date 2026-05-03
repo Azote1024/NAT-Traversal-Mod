@@ -29,7 +29,8 @@ public final class RuntimeConfigLoader {
                 Config.stunServer(),
                 Config.stunTimeoutMs(),
                 Config.quicEnabled(),
-                Config.quicPublishEndpoint(),
+                Config.quicBindHost(),
+                Config.quicBindPort(),
                 Config.quicStatus(),
                 normalizeQuicTlsMode(Config.quicTlsModeName()),
                 Config.quicTlsCertFile(),
@@ -38,6 +39,12 @@ public final class RuntimeConfigLoader {
                 QUIC_CLIENT_LOCAL_PORT_DEFAULT,
                 Config.quicAttempts(),
                 Config.quicAttemptIntervalMs(),
+                Config.punchWindowDelayMs(),
+                Config.punchWindowMs(),
+                Config.punchHostAssistPollMs(),
+                Config.punchBurstCount(),
+                Config.punchBurstIntervalMs(),
+                Config.punchStaleAttemptMs(),
                 Config.routingTcpAttempts(),
                 Config.routingStageResetMs()
         );

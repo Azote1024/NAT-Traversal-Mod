@@ -114,6 +114,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                     errorCode,
                     quicConnectFuture.cause()
             );
+            logAttemptOutcome(roomName, normalizedAttemptId, "quic_direct_failed", errorCode);
             udpChannel.close().syncUninterruptibly();
             return Optional.empty();
         }
@@ -156,6 +157,7 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                     errorCode,
                     streamFuture.cause()
             );
+            logAttemptOutcome(roomName, normalizedAttemptId, "quic_direct_failed", errorCode);
             quicChannel.close().syncUninterruptibly();
             udpChannel.close().syncUninterruptibly();
             return Optional.empty();
@@ -178,6 +180,17 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 address.getHostString(),
                 address.getPort()
         );
+        SupabaseQuicSessionClient.upsertPeerAttempt(
+                roomName,
+                QuicP2pManager.clientKey(),
+                normalizedAttemptId,
+                "unknown",
+                "quic_try",
+                "established",
+                "",
+                false
+        );
+        logAttemptOutcome(roomName, normalizedAttemptId, "quic_direct_success", "");
 
         return Optional.of(stream.newSucceededFuture());
     }
@@ -222,7 +235,8 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                             value.punchSyncToken(),
                             value.punchWindowOpenedAt(),
                             value.punchWindowMs(),
-                            value.lastTransition()
+                            value.lastTransition(),
+                            Instant.now().toString()
                     ));
                 }
             }
@@ -235,9 +249,20 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         String syncToken = syncInfo.map(SupabaseQuicSessionClient.PeerPunchSyncInfo::punchSyncToken).orElse("");
         String payload = "NAT-PUNCH " + roomName + " " + attemptId + " " + syncToken + " preconnect";
         byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
-        for (int i = 0; i < 3; i++) {
+        int burstCount = Math.max(1, runtimeConfig.punchBurstCount());
+        int burstIntervalMs = Math.max(0, runtimeConfig.punchBurstIntervalMs());
+        for (int i = 0; i < burstCount; i++) {
             DatagramPacket packet = new DatagramPacket(Unpooled.wrappedBuffer(bytes), address);
             udpChannel.writeAndFlush(packet).syncUninterruptibly();
+            if (burstIntervalMs == 0 || i + 1 >= burstCount) {
+                continue;
+            }
+            try {
+                Thread.sleep(burstIntervalMs);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
 
         QuicAttemptRecorder.markPunchSent(roomName, clientKey, attemptId);
@@ -259,12 +284,23 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_PRE_PUNCH_SENT
                         + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
-                        + QuicLogSchema.FIELD_TARGET + "='{}:{}' sync_token_present={} count=3",
+                        + QuicLogSchema.FIELD_TARGET + "='{}:{}' sync_token_present={} count={}",
                 roomName,
                 attemptId,
                 address.getHostString(),
                 address.getPort(),
-                !syncToken.isBlank()
+                !syncToken.isBlank(),
+                burstCount
+        );
+    }
+
+    private static void logAttemptOutcome(String roomName, String attemptId, String outcome, String errorCode) {
+        NatTraversalMod.LOGGER.info(
+                "[nat-traversal-mod] quic_attempt outcome='{}' room_name='{}' attempt_id='{}' error_code='{}'",
+                outcome,
+                roomName,
+                attemptId,
+                errorCode == null ? "" : errorCode
         );
     }
 

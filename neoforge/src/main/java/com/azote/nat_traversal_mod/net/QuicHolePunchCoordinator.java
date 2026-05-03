@@ -13,7 +13,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class QuicHolePunchCoordinator {
-    private static final int PUNCH_WINDOW_DELAY_MS = 600;
     private static final Pattern HOST_PUBLIC_ENDPOINT_PATTERN = Pattern.compile("\"host_public_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_ENDPOINT_PATTERN = Pattern.compile("\"punch_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_STATUS_PATTERN = Pattern.compile("\"punch_status\"\\s*:\\s*\"([^\"]*)\"");
@@ -23,6 +22,7 @@ final class QuicHolePunchCoordinator {
     }
 
     static void prepareOneShotPunch(String roomBody, String roomName, RelayEndpoint quicEndpoint, String attemptId, String clientKey) {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         Optional<String> punchStatusValue = findFirst(PUNCH_STATUS_PATTERN, roomBody).map(String::trim);
         if (punchStatusValue.isEmpty() || !shouldSendPunch(punchStatusValue.get())) {
             NatTraversalMod.LOGGER.info(
@@ -50,10 +50,10 @@ final class QuicHolePunchCoordinator {
         }
 
         String syncToken = UUID.randomUUID().toString();
-        Instant windowOpenInstant = Instant.now().plusMillis(PUNCH_WINDOW_DELAY_MS);
+        Instant windowOpenInstant = Instant.now().plusMillis(runtimeConfig.punchWindowDelayMs());
         String windowOpenedAt = windowOpenInstant.toString();
-        int windowMs = 2200;
-        String clientPublicEndpoint = resolveClientPublicEndpoint();
+        int windowMs = runtimeConfig.punchWindowMs();
+        String clientPublicEndpoint = resolveClientPublicEndpoint(runtimeConfig);
         SupabaseQuicSessionClient.upsertPeerAttemptSync(
                 roomName,
                 clientKey,
@@ -113,8 +113,7 @@ final class QuicHolePunchCoordinator {
                 || "client_probe_sent".equals(status);
     }
 
-    private static String resolveClientPublicEndpoint() {
-        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+    private static String resolveClientPublicEndpoint(RuntimeConfigSnapshot runtimeConfig) {
         if (!runtimeConfig.stunEnabled()) {
             return "";
         }

@@ -44,7 +44,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class NettyQuicServerTunnel implements QuicServerTunnel {
     private static final long MAX_DATA = 2_097_152L;
-    private static final long HOST_PUNCH_ASSIST_POLL_MILLIS = 300L;
 
     private EventLoopGroup eventLoopGroup;
     private Channel udpChannel;
@@ -62,6 +61,10 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
     private volatile String hostStunServer = "";
     private volatile int hostStunTimeoutMs;
     private volatile RelayEndpoint hostBindTarget;
+    private volatile int hostPunchAssistPollMs = 300;
+    private volatile int punchBurstCount = 3;
+    private volatile int punchBurstIntervalMs = 40;
+    private volatile int punchStaleAttemptMs = 30_000;
 
     @Override
     public synchronized void start(int serverPort) {
@@ -69,16 +72,6 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         establishedMarked.set(false);
 
         RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
-
-        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(runtimeConfig.quicPublishEndpoint(), "quic.publish_endpoint");
-        if (endpoint.isEmpty()) {
-            NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_DISABLED
-                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' reason='invalid_quic.publish_endpoint'",
-                    runtimeConfig.roomName()
-            );
-            return;
-        }
 
         File certFile = resolveTlsFile(runtimeConfig.quicTlsCertFile());
         File keyFile = resolveTlsFile(runtimeConfig.quicTlsKeyFile());
@@ -93,7 +86,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             return;
         }
 
-        RelayEndpoint bindTarget = endpoint.get();
+        RelayEndpoint bindTarget = resolveQuicBindTarget(runtimeConfig);
         targetServerPort = serverPort;
         eventLoopGroup = new NioEventLoopGroup(1);
 
@@ -132,11 +125,12 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             String attemptId = currentAttemptId(runtimeConfig.roomName());
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] quic_server " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_STARTED
-                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' bind='{}:{}' target='127.0.0.1:{}'",
+                            + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' bind='{}:{}' publish_fallback='{}' target='127.0.0.1:{}'",
                     runtimeConfig.roomName(),
                     attemptId,
                     bindTarget.host(),
                     bindTarget.port(),
+                    hostPublishedEndpoint,
                     targetServerPort
             );
         } catch (Throwable exception) {
@@ -156,6 +150,13 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         }
     }
 
+    private static RelayEndpoint resolveQuicBindTarget(RuntimeConfigSnapshot runtimeConfig) {
+        String bindHost = runtimeConfig.quicBindHost().isBlank()
+                ? "0.0.0.0"
+                : runtimeConfig.quicBindHost().trim();
+        return new RelayEndpoint(bindHost, runtimeConfig.quicBindPort());
+    }
+
     private Channel bindUdpChannel(ChannelHandler codec, RelayEndpoint bindTarget) {
         Bootstrap bootstrap = new Bootstrap()
                 .group(eventLoopGroup)
@@ -165,7 +166,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         InetSocketAddress requested = new InetSocketAddress(bindTarget.host(), bindTarget.port());
         InetSocketAddress preferred = preferBindableAddress(requested);
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] QUIC bind selection: publish='{}:{}', bind='{}:{}'",
+                "[nat-traversal-mod] QUIC bind selection: configured='{}:{}', bind='{}:{}'",
                 bindTarget.host(),
                 bindTarget.port(),
                 preferred.getAddress() == null ? preferred.getHostString() : preferred.getAddress().getHostAddress(),
@@ -180,7 +181,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
 
             InetSocketAddress wildcard = new InetSocketAddress("0.0.0.0", bindTarget.port());
             NatTraversalMod.LOGGER.warn(
-                    "[nat-traversal-mod] QUIC bind failed on publish host '{}:{}'; retrying with wildcard '{}:{}'.",
+                    "[nat-traversal-mod] QUIC bind failed on configured host '{}:{}'; retrying with wildcard '{}:{}'.",
                     bindTarget.host(),
                     bindTarget.port(),
                     wildcard.getAddress() == null ? wildcard.getHostString() : wildcard.getAddress().getHostAddress(),
@@ -202,7 +203,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
 
         InetSocketAddress wildcard = new InetSocketAddress("0.0.0.0", requested.getPort());
         NatTraversalMod.LOGGER.warn(
-                "[nat-traversal-mod] QUIC publish host '{}:{}' is not assigned locally; binding wildcard '{}:{}' instead.",
+                "[nat-traversal-mod] QUIC configured bind host '{}:{}' is not assigned locally; binding wildcard '{}:{}' instead.",
                 host,
                 requested.getPort(),
                 wildcard.getAddress() == null ? wildcard.getHostString() : wildcard.getAddress().getHostAddress(),
@@ -254,6 +255,10 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         hostStunServer = "";
         hostStunTimeoutMs = 0;
         hostBindTarget = null;
+        hostPunchAssistPollMs = 300;
+        punchBurstCount = 3;
+        punchBurstIntervalMs = 40;
+        punchStaleAttemptMs = 30_000;
         establishedMarked.set(false);
         RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         SupabaseQuicSessionClient.markHostPunchDown(runtimeConfig.roomName());
@@ -386,7 +391,11 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         hostStunServer = runtimeConfig.stunServer();
         hostStunTimeoutMs = runtimeConfig.stunTimeoutMs();
         hostBindTarget = bindTarget;
-        hostPublishedEndpoint = bindTarget.host() + ":" + bindTarget.port();
+        hostPunchAssistPollMs = runtimeConfig.punchHostAssistPollMs();
+        punchBurstCount = runtimeConfig.punchBurstCount();
+        punchBurstIntervalMs = runtimeConfig.punchBurstIntervalMs();
+        punchStaleAttemptMs = runtimeConfig.punchStaleAttemptMs();
+        hostPublishedEndpoint = fallbackHostPublicEndpoint(runtimeConfig, bindTarget);
         hostObservedPublicEndpoint = resolveHostObservedPublicEndpoint(runtimeConfig, bindTarget, udpChannel);
         hostObservedUpdatedAtMillis = System.currentTimeMillis();
         SupabaseQuicSessionClient.updateHostPublicEndpoint(roomName, hostObservedPublicEndpoint);
@@ -403,7 +412,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
                 if (syncInfo.isPresent()) {
                     maybeSendHostPunchAssist(roomName, syncInfo.get());
                 }
-                Thread.sleep(HOST_PUNCH_ASSIST_POLL_MILLIS);
+                Thread.sleep(hostPunchAssistPollMs);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 return;
@@ -414,7 +423,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
                         exception
                 );
                 try {
-                    Thread.sleep(HOST_PUNCH_ASSIST_POLL_MILLIS);
+                    Thread.sleep(hostPunchAssistPollMs);
                 } catch (InterruptedException interruptedException) {
                     Thread.currentThread().interrupt();
                     return;
@@ -428,6 +437,17 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         String clientKey = syncInfo.clientKey() == null ? "" : syncInfo.clientKey();
         String attemptId = syncInfo.attemptId() == null ? "" : syncInfo.attemptId();
         if (clientKey.isBlank() || attemptId.isBlank()) {
+            return;
+        }
+
+        if (isPeerAttemptStale(syncInfo, punchStaleAttemptMs)) {
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] quic_punch phase=host_assist_skip error_code=stale_peer_attempt room_name='{}' attempt_id='{}' updated_at='{}' stale_ms={}",
+                    roomName,
+                    attemptId,
+                    syncInfo.updatedAt(),
+                    punchStaleAttemptMs
+            );
             return;
         }
 
@@ -461,7 +481,8 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
 
         String assistKey = attemptId + "|" + syncInfo.punchSyncToken() + "|" + syncInfo.punchWindowOpenedAt();
         long nowMillis = System.currentTimeMillis();
-        if (assistKey.equals(lastPunchAssistKey) && (nowMillis - lastPunchAssistSentAtMillis) < 450L) {
+        long dedupeWindowMs = Math.max(50L, Math.min(450L, hostPunchAssistPollMs * 2L));
+        if (assistKey.equals(lastPunchAssistKey) && (nowMillis - lastPunchAssistSentAtMillis) < dedupeWindowMs) {
             return;
         }
 
@@ -505,14 +526,15 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         lastPunchAssistKey = assistKey;
         lastPunchAssistSentAtMillis = nowMillis;
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] quic_punch phase=host_assist_sent room_name='{}' attempt_id='{}' endpoint='{}:{}' host_published_endpoint='{}' host_observed_public_endpoint='{}' window_ms={}",
+                "[nat-traversal-mod] quic_punch phase=host_assist_sent room_name='{}' attempt_id='{}' endpoint='{}:{}' host_published_endpoint='{}' host_observed_public_endpoint='{}' window_ms={} burst_count={}",
                 roomName,
                 attemptId,
                 parsedClientEndpoint.get().host(),
                 parsedClientEndpoint.get().port(),
                 hostPublishedEndpoint,
                 hostObservedPublicEndpoint,
-                syncInfo.punchWindowMs()
+                syncInfo.punchWindowMs(),
+                punchBurstCount
         );
     }
 
@@ -527,6 +549,22 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             Instant openedAt = Instant.parse(syncInfo.punchWindowOpenedAt());
             Instant deadline = openedAt.plusMillis(syncInfo.punchWindowMs());
             return Instant.now().isAfter(deadline);
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    private static boolean isPeerAttemptStale(SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo, int staleAttemptMs) {
+        if (staleAttemptMs <= 0) {
+            return false;
+        }
+        String updatedAt = syncInfo.updatedAt();
+        if (updatedAt == null || updatedAt.isBlank()) {
+            return false;
+        }
+        try {
+            Instant updated = Instant.parse(updatedAt);
+            return Instant.now().isAfter(updated.plusMillis(staleAttemptMs));
         } catch (DateTimeParseException exception) {
             return false;
         }
@@ -579,7 +617,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
     }
 
     private static String resolveHostObservedPublicEndpoint(RuntimeConfigSnapshot runtimeConfig, RelayEndpoint bindTarget, Channel udpChannel) {
-        String fallback = bindTarget.host() + ":" + bindTarget.port();
+        String fallback = fallbackHostPublicEndpoint(runtimeConfig, bindTarget);
         if (!runtimeConfig.stunEnabled()) {
             return fallback;
         }
@@ -617,6 +655,16 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         return resolved;
     }
 
+    private static String fallbackHostPublicEndpoint(RuntimeConfigSnapshot runtimeConfig, RelayEndpoint bindTarget) {
+        if (!runtimeConfig.publishHostIp().isBlank()) {
+            return runtimeConfig.publishHostIp() + ":" + bindTarget.port();
+        }
+        if (!isWildcardHost(bindTarget.host())) {
+            return bindTarget.host() + ":" + bindTarget.port();
+        }
+        return "";
+    }
+
     private String withHostEndpointContext(String baseTransition) {
         return baseTransition
                 + "|published=" + hostPublishedEndpoint
@@ -628,11 +676,16 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             return;
         }
         byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
-        for (int i = 0; i < 3; i++) {
+        int count = Math.max(1, punchBurstCount);
+        int intervalMs = Math.max(0, punchBurstIntervalMs);
+        for (int i = 0; i < count; i++) {
             DatagramPacket packet = new DatagramPacket(Unpooled.wrappedBuffer(bytes), new InetSocketAddress(endpoint.host(), endpoint.port()));
             udpChannel.writeAndFlush(packet);
+            if (intervalMs == 0 || i + 1 >= count) {
+                continue;
+            }
             try {
-                Thread.sleep(40L);
+                Thread.sleep(intervalMs);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 return;

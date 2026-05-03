@@ -131,7 +131,7 @@ public final class SupabaseQuicSessionClient {
 		String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
 		String endpoint = loadedAuth.supabaseUrl()
 				+ SupabaseApiPaths.QUIC_PEER_ATTEMPTS
-				+ "?select=client_key,client_public_endpoint,attempt_id,punch_sync_token,punch_window_opened_at,punch_window_ms,last_transition"
+				+ "?select=client_key,client_public_endpoint,attempt_id,punch_sync_token,punch_window_opened_at,punch_window_ms,last_transition,updated_at"
 				+ "&room_name=eq." + encodedRoomName
 				+ "&order=updated_at.desc"
 				+ "&limit=1";
@@ -163,8 +163,9 @@ public final class SupabaseQuicSessionClient {
 			String syncToken = JsonRegexDtoParser.findStringField(body, "punch_sync_token").orElse("");
 			String windowOpenedAt = JsonRegexDtoParser.findStringField(body, "punch_window_opened_at").orElse("");
 			String lastTransition = JsonRegexDtoParser.findStringField(body, "last_transition").orElse("");
+			String updatedAt = JsonRegexDtoParser.findStringField(body, "updated_at").orElse("");
 			int windowMs = parseWindowMs(body);
-			return Optional.of(new PeerPunchSyncInfo(clientKey, clientEndpoint.get(), attemptId, syncToken, windowOpenedAt, windowMs, lastTransition));
+			return Optional.of(new PeerPunchSyncInfo(clientKey, clientEndpoint.get(), attemptId, syncToken, windowOpenedAt, windowMs, lastTransition, updatedAt));
 		} catch (IOException | InterruptedException exception) {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
@@ -187,7 +188,7 @@ public final class SupabaseQuicSessionClient {
 		SupabaseAuth loadedAuth = auth.get();
 		String endpoint = loadedAuth.supabaseUrl()
 				+ SupabaseApiPaths.QUIC_PEER_ATTEMPTS
-				+ "?select=client_key,client_public_endpoint,attempt_id,punch_sync_token,punch_window_opened_at,punch_window_ms,last_transition"
+				+ "?select=client_key,client_public_endpoint,attempt_id,punch_sync_token,punch_window_opened_at,punch_window_ms,last_transition,updated_at"
 				+ "&room_name=eq." + URLEncoder.encode(roomName, StandardCharsets.UTF_8)
 				+ "&client_key=eq." + URLEncoder.encode(clientKey, StandardCharsets.UTF_8)
 				+ "&attempt_id=eq." + URLEncoder.encode(attemptId, StandardCharsets.UTF_8)
@@ -211,8 +212,9 @@ public final class SupabaseQuicSessionClient {
 			String syncToken = JsonRegexDtoParser.findStringField(body, "punch_sync_token").orElse("");
 			String windowOpenedAt = JsonRegexDtoParser.findStringField(body, "punch_window_opened_at").orElse("");
 			String lastTransition = JsonRegexDtoParser.findStringField(body, "last_transition").orElse("");
+			String updatedAt = JsonRegexDtoParser.findStringField(body, "updated_at").orElse("");
 			int windowMs = parseWindowMs(body);
-			return Optional.of(new PeerPunchSyncInfo(clientKey, clientEndpoint.get(), attemptId, syncToken, windowOpenedAt, windowMs, lastTransition));
+			return Optional.of(new PeerPunchSyncInfo(clientKey, clientEndpoint.get(), attemptId, syncToken, windowOpenedAt, windowMs, lastTransition, updatedAt));
 		} catch (IOException | InterruptedException exception) {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
@@ -576,7 +578,8 @@ public final class SupabaseQuicSessionClient {
 			String punchSyncToken,
 			String punchWindowOpenedAt,
 			int punchWindowMs,
-			String lastTransition
+			String lastTransition,
+			String updatedAt
 	) {
 	}
 }
