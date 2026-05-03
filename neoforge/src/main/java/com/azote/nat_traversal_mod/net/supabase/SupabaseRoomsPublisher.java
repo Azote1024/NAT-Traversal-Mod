@@ -4,7 +4,6 @@ import com.azote.nat_traversal_mod.NatTraversalMod;
 import com.azote.nat_traversal_mod.net.StunClient;
 
 import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -30,7 +29,7 @@ public final class SupabaseRoomsPublisher {
             return;
         }
 
-        String endpoint = config.supabaseUrl + "/rest/v1/rooms";
+        String endpoint = config.supabaseUrl + SupabaseApiPaths.ROOMS;
         String updatedAt = Instant.now().toString();
         NatClassification natClassification = classifyHostNat(config, hostPort);
         String body = buildOpenRoomBody(config, hostPort, updatedAt, natClassification);
@@ -74,12 +73,12 @@ public final class SupabaseRoomsPublisher {
         }
 
         String encodedRoomName = URLEncoder.encode(config.roomName, StandardCharsets.UTF_8);
-        String endpoint = config.supabaseUrl + "/rest/v1/rooms?room_name=eq." + encodedRoomName;
+        String endpoint = config.supabaseUrl + SupabaseApiPaths.ROOMS + "?room_name=eq." + encodedRoomName;
         String updatedAt = Instant.now().toString();
-        String body = "{" +
-                "\"status\":\"closed\"," +
-                "\"updated_at\":\"" + SupabaseJsonUtil.escape(updatedAt) + "\"" +
-                "}";
+        String body = new SupabaseJsonObjectBuilder()
+                .addString("status", "closed")
+                .addString("updated_at", updatedAt)
+                .build();
 
         RequestResult result = sendJsonRequest(
                 endpoint,
@@ -104,18 +103,19 @@ public final class SupabaseRoomsPublisher {
 
     private static RequestResult sendJsonRequest(String endpoint, String method, String body, String supabaseKey, String prefer) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-                    .timeout(REQUEST_TIMEOUT)
-                    .header("apikey", supabaseKey)
-                    .header("Content-Type", "application/json")
-                    .header("Prefer", prefer)
-                    .method(method, HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                    .build();
+            HttpRequest request = SupabaseRestClient.buildAuthorizedJsonRequest(
+                    endpoint,
+                    method,
+                    supabaseKey,
+                    body,
+                    REQUEST_TIMEOUT,
+                    prefer
+            );
 
             HttpResponse<String> response = SupabaseRestClient.sendString(request);
             int statusCode = response.statusCode();
             String responseBody = response.body();
-            boolean success = statusCode >= 200 && statusCode < 300;
+            boolean success = SupabaseRestClient.classifyDefault(statusCode) == SupabaseRestClient.ResponseCategory.SUCCESS;
             return new RequestResult(success, statusCode, responseBody);
         } catch (IOException exception) {
             NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Room publish exception.", exception);
@@ -131,56 +131,36 @@ public final class SupabaseRoomsPublisher {
     }
 
     private static String buildOpenRoomBody(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
-        return "{" +
-                "\"room_name\":\"" + SupabaseJsonUtil.escape(config.roomName) + "\"," +
-                "\"host_name\":\"" + SupabaseJsonUtil.escape(config.hostName) + "\"," +
-                "\"host_ip\":\"" + SupabaseJsonUtil.escape(config.hostIp) + "\"," +
-                "\"host_port\":" + hostPort + "," +
-                "\"status\":\"open\"," +
-                "\"updated_at\":\"" + SupabaseJsonUtil.escape(updatedAt) + "\"" +
-                appendNatRoutingFields(natClassification, updatedAt) +
-                appendRelayFieldsForOpenRoom(config) +
-                appendNatFieldsForOpenRoom(natClassification) +
-                appendCandidatesForOpenRoom(config, hostPort) +
-                "}";
-    }
-
-    private static String appendRelayFieldsForOpenRoom(PublishConfig config) {
-        return ","
-                + "\"relay_endpoint\":\"" + SupabaseJsonUtil.escape(config.relayEndpoint) + "\","
-                + "\"relay_token\":\"" + SupabaseJsonUtil.escape(config.relayToken) + "\","
-                + "\"relay_status\":\"" + SupabaseJsonUtil.escape(config.relayStatus) + "\"";
-    }
-
-    private static String appendNatFieldsForOpenRoom(NatClassification natClassification) {
-        return ","
-                + "\"nat_method\":\"" + SupabaseJsonUtil.escape(natClassification.natMethod()) + "\","
-                + "\"public_endpoint\":\"" + SupabaseJsonUtil.escape(natClassification.publicEndpoint()) + "\"";
-    }
-
-    private static String appendNatRoutingFields(NatClassification natClassification, String updatedAt) {
         String routeHint = "";
-        return ","
-                + "\"host_nat_type\":\"" + SupabaseJsonUtil.escape(natClassification.hostNatType()) + "\","
-                + "\"nat_confidence\":\"" + SupabaseJsonUtil.escape(natClassification.natConfidence()) + "\","
-                + "\"nat_classified_at\":\"" + SupabaseJsonUtil.escape(updatedAt) + "\","
-                + "\"route_hint\":\"" + SupabaseJsonUtil.escape(routeHint) + "\"";
+        return new SupabaseJsonObjectBuilder()
+                .addString("room_name", config.roomName)
+                .addString("host_name", config.hostName)
+                .addString("host_ip", config.hostIp)
+                .addNumber("host_port", hostPort)
+                .addString("status", "open")
+                .addString("updated_at", updatedAt)
+                .addString("host_nat_type", natClassification.hostNatType())
+                .addString("nat_confidence", natClassification.natConfidence())
+                .addString("nat_classified_at", updatedAt)
+                .addString("route_hint", routeHint)
+                .addString("relay_endpoint", config.relayEndpoint)
+                .addString("relay_token", config.relayToken)
+                .addString("relay_status", config.relayStatus)
+                .addString("nat_method", natClassification.natMethod())
+                .addString("public_endpoint", natClassification.publicEndpoint())
+                .addRawJson("candidates", buildCandidatesJson(config, hostPort))
+                .build();
     }
 
-    private static String appendCandidatesForOpenRoom(PublishConfig config, int hostPort) {
+    private static String buildCandidatesJson(PublishConfig config, int hostPort) {
         String directEndpoint = config.hostIp + ":" + hostPort;
-        String quicEndpoint = config.quicEndpoint;
-        String quicStatus = config.quicStatus;
-
-        String candidates = "{" +
-                "\"direct_endpoint\":\"" + SupabaseJsonUtil.escape(directEndpoint) + "\"," +
-                "\"quic_endpoint\":\"" + SupabaseJsonUtil.escape(quicEndpoint) + "\"," +
-                "\"quic_status\":\"" + SupabaseJsonUtil.escape(quicStatus) + "\"," +
-                "\"quic_attempts\":" + config.quicAttempts + "," +
-                "\"quic_attempt_interval_ms\":" + config.quicAttemptIntervalMs +
-                "}";
-
-        return ",\"candidates\":" + candidates;
+        return new SupabaseJsonObjectBuilder()
+                .addString("direct_endpoint", directEndpoint)
+                .addString("quic_endpoint", config.quicEndpoint)
+                .addString("quic_status", config.quicStatus)
+                .addNumber("quic_attempts", config.quicAttempts)
+                .addNumber("quic_attempt_interval_ms", config.quicAttemptIntervalMs)
+                .build();
     }
 
 
@@ -204,7 +184,7 @@ public final class SupabaseRoomsPublisher {
         }
 
         if (hostName.isBlank() || hostIp.isBlank()) {
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: set publish_host_name and publish_host_ip in config.");
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: set publish.host_name and publish.host_ip in config.");
             return null;
         }
 
@@ -239,25 +219,25 @@ public final class SupabaseRoomsPublisher {
     }
 
     private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
-        String endpoint = config.supabaseUrl + "/rest/v1/quic_sessions";
+        String endpoint = config.supabaseUrl + SupabaseApiPaths.QUIC_SESSIONS;
         String defaultPunchEndpoint = config.hostIp + ":" + hostPort;
         String punchToken = buildPunchToken(config.roomName, updatedAt);
         String routeDecision = "quic_try";
         String relayReason = "";
-        String body = "{"
-                + "\"room_name\":\"" + SupabaseJsonUtil.escape(config.roomName) + "\","
-                + "\"quic_endpoint\":\"" + SupabaseJsonUtil.escape(config.quicEndpoint) + "\","
-                + "\"quic_status\":\"" + SupabaseJsonUtil.escape(config.quicStatus) + "\","
-                + "\"punch_endpoint\":\"" + SupabaseJsonUtil.escape(defaultPunchEndpoint) + "\","
-                + "\"punch_status\":\"ready\","
-                + "\"punch_token\":\"" + SupabaseJsonUtil.escape(punchToken) + "\","
-                + "\"host_nat_type\":\"" + SupabaseJsonUtil.escape(natClassification.hostNatType()) + "\","
-                + "\"route_decision\":\"" + SupabaseJsonUtil.escape(routeDecision) + "\","
-                + "\"route_decided_at\":\"" + SupabaseJsonUtil.escape(updatedAt) + "\","
-                + "\"relay_reason\":\"" + SupabaseJsonUtil.escape(relayReason) + "\","
-                + "\"status\":\"open\","
-                + "\"updated_at\":\"" + SupabaseJsonUtil.escape(updatedAt) + "\""
-                + "}";
+        String body = new SupabaseJsonObjectBuilder()
+                .addString("room_name", config.roomName)
+                .addString("quic_endpoint", config.quicEndpoint)
+                .addString("quic_status", config.quicStatus)
+                .addString("punch_endpoint", defaultPunchEndpoint)
+                .addString("punch_status", "ready")
+                .addString("punch_token", punchToken)
+                .addString("host_nat_type", natClassification.hostNatType())
+                .addString("route_decision", routeDecision)
+                .addString("route_decided_at", updatedAt)
+                .addString("relay_reason", relayReason)
+                .addString("status", "open")
+                .addString("updated_at", updatedAt)
+                .build();
 
         RequestResult result = sendJsonRequest(
                 endpoint,
@@ -278,16 +258,16 @@ public final class SupabaseRoomsPublisher {
 
     private static void closeQuicSession(PublishConfig config, String updatedAt) {
         String encodedRoomName = URLEncoder.encode(config.roomName, StandardCharsets.UTF_8);
-        String endpoint = config.supabaseUrl + "/rest/v1/quic_sessions?room_name=eq." + encodedRoomName;
-        String body = "{"
-                + "\"status\":\"closed\"," 
-                + "\"quic_status\":\"down\"," 
-                + "\"punch_status\":\"idle\","
-                + "\"punch_token\":\"\","
-                + "\"route_decision\":\"\","
-                + "\"relay_reason\":\"\","
-                + "\"updated_at\":\"" + SupabaseJsonUtil.escape(updatedAt) + "\""
-                + "}";
+        String endpoint = config.supabaseUrl + SupabaseApiPaths.QUIC_SESSIONS + "?room_name=eq." + encodedRoomName;
+        String body = new SupabaseJsonObjectBuilder()
+                .addString("status", "closed")
+                .addString("quic_status", "down")
+                .addString("punch_status", "idle")
+                .addString("punch_token", "")
+                .addString("route_decision", "")
+                .addString("relay_reason", "")
+                .addString("updated_at", updatedAt)
+                .build();
 
         RequestResult result = sendJsonRequest(
                 endpoint,

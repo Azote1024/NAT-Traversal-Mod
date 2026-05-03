@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class RoomSnapshotParser {
@@ -78,7 +79,11 @@ final class RoomSnapshotParser {
     }
 
     private static Optional<String> findFirst(Pattern pattern, String body) {
-        return JsonRegexDtoParser.findFirst(pattern, body).map(JsonRegexDtoParser.JsonFieldMatch::rawValue);
+        Matcher matcher = pattern.matcher(body);
+        if (!matcher.find()) {
+            return Optional.empty();
+        }
+        return Optional.of(matcher.group(1));
     }
 
     record RoomSnapshot(

@@ -21,5 +21,10 @@ final class JsonRegexDtoParser {
         }
         return Optional.of(new JsonFieldMatch(matcher.group(1)));
     }
+
+    static Optional<String> findStringField(String body, String fieldName) {
+        Pattern pattern = Pattern.compile("\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*\"([^\"]*)\"");
+        return findFirst(pattern, body).map(JsonFieldMatch::trimmedValue);
+    }
 }
 

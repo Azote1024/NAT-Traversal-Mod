@@ -5,7 +5,6 @@ import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import com.azote.nat_traversal_mod.NatTraversalMod;
 
 import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -13,31 +12,33 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.regex.Pattern;
 
 public final class SupabaseQuicSessionClient {
-	private static final Pattern ATTEMPT_ID_PATTERN = Pattern.compile("\"attempt_id\"\\s*:\\s*\"([^\"]*)\"");
+	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(4);
+	private static final String QUIC_SESSION_SELECT_RICH =
+			"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_probe_sent_at,attempt_id,last_error_code,host_nat_type,route_decision,relay_reason,status,updated_at";
+	private static final String QUIC_SESSION_SELECT_FALLBACK =
+			"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_nat_type,route_decision,relay_reason,status,updated_at";
 	private static volatile boolean peerAttemptsUnavailableLogged;
 
 	private SupabaseQuicSessionClient() {
 	}
 
 	public static Optional<String> fetchSessionBody(String roomName) {
-		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
-		String supabaseUrl = runtimeConfig.supabaseUrl();
-		String supabaseKey = runtimeConfig.supabaseApiKey();
-		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
+		Optional<SupabaseAuth> auth = loadAuth();
+		if (auth.isEmpty() || roomName.isBlank()) {
 			return Optional.empty();
 		}
 
 		String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
+		SupabaseAuth loadedAuth = auth.get();
 
 		try {
 			Optional<String> richBody = fetchSessionBodyOnce(
-					supabaseUrl,
-					supabaseKey,
+					loadedAuth.supabaseUrl(),
+					loadedAuth.supabaseKey(),
 					encodedRoomName,
-					"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_probe_sent_at,attempt_id,last_error_code,host_nat_type,route_decision,relay_reason,status,updated_at",
+					QUIC_SESSION_SELECT_RICH,
 					roomName,
 					false
 			);
@@ -46,10 +47,10 @@ public final class SupabaseQuicSessionClient {
 			}
 
 			return fetchSessionBodyOnce(
-					supabaseUrl,
-					supabaseKey,
+					loadedAuth.supabaseUrl(),
+					loadedAuth.supabaseKey(),
 					encodedRoomName,
-					"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_nat_type,route_decision,relay_reason,status,updated_at",
+					QUIC_SESSION_SELECT_FALLBACK,
 					roomName,
 					true
 			);
@@ -75,23 +76,20 @@ public final class SupabaseQuicSessionClient {
 			boolean fallbackMode
 	) throws IOException, InterruptedException {
 		String endpoint = supabaseUrl
-				+ "/rest/v1/quic_sessions?select=" + selectColumns
+				+ SupabaseApiPaths.QUIC_SESSIONS + "?select=" + selectColumns
 				+ "&room_name=eq." + encodedRoomName
 				+ "&status=eq.open";
 
-		HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-				.timeout(Duration.ofSeconds(4))
-				.header("apikey", supabaseKey)
-				.header("Accept", "application/json")
-				.GET()
-				.build();
+		HttpRequest request = SupabaseRestClient.buildAuthorizedGetJsonRequest(endpoint, supabaseKey, REQUEST_TIMEOUT);
 
 		HttpResponse<String> response = SupabaseRestClient.sendString(request);
-		if (response.statusCode() >= 200 && response.statusCode() < 300) {
+		int statusCode = response.statusCode();
+		SupabaseRestClient.ResponseCategory category = SupabaseRestClient.classifySessionQuery(statusCode);
+		if (category == SupabaseRestClient.ResponseCategory.SUCCESS) {
 			return Optional.of(response.body());
 		}
 
-		if (!fallbackMode && response.statusCode() == 400) {
+		if (!fallbackMode && category == SupabaseRestClient.ResponseCategory.SCHEMA_MISMATCH) {
 			NatTraversalMod.LOGGER.info(
 					"[nat-traversal-mod] QUIC session query schema mismatch. retry with legacy select. room_name='{}'",
 					roomName
@@ -99,9 +97,18 @@ public final class SupabaseQuicSessionClient {
 			return Optional.empty();
 		}
 
+		if (category == SupabaseRestClient.ResponseCategory.ENDPOINT_UNAVAILABLE) {
+			NatTraversalMod.LOGGER.info(
+					"[nat-traversal-mod] QUIC session endpoint unavailable. status={}, room_name='{}'.",
+					statusCode,
+					roomName
+			);
+			return Optional.empty();
+		}
+
 		NatTraversalMod.LOGGER.info(
 				"[nat-traversal-mod] QUIC session query failed. status={}, room_name='{}'.",
-				response.statusCode(),
+				statusCode,
 				roomName
 		);
 		return Optional.empty();
@@ -112,34 +119,50 @@ public final class SupabaseQuicSessionClient {
 	}
 
 	public static void markClientAttemptStarted(String roomName, String attemptId) {
-		patchSession(roomName, "{"
-				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
-				+ "\"last_error_code\":\"\""
-				+ "}", "Failed to mark client attempt id");
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("attempt_id", attemptId)
+						.addString("last_error_code", "")
+						.build(),
+				"Failed to mark client attempt id"
+		);
 	}
 
 	public static void markClientPunchSent(String roomName, String attemptId) {
-		patchSession(roomName, "{"
-				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
-				+ "\"punch_status\":\"client_probe_sent\","
-				+ "\"client_punch_sent_at\":\"" + Instant.now() + "\","
-				+ "\"last_error_code\":\"\""
-				+ "}", "Failed to mark client punch status");
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("attempt_id", attemptId)
+						.addString("punch_status", "client_probe_sent")
+						.addString("client_punch_sent_at", Instant.now().toString())
+						.addString("last_error_code", "")
+						.build(),
+				"Failed to mark client punch status"
+		);
 	}
 
 	public static void markHostPunchProbing(String roomName) {
-		patchSession(roomName, "{"
-				+ "\"punch_status\":\"probing\","
-				+ "\"host_probe_sent_at\":\"" + Instant.now() + "\","
-				+ "\"last_error_code\":\"\""
-				+ "}", "Failed to mark host punch probing");
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("punch_status", "probing")
+						.addString("host_probe_sent_at", Instant.now().toString())
+						.addString("last_error_code", "")
+						.build(),
+				"Failed to mark host punch probing"
+		);
 	}
 
 	public static void markHostPunchEstablished(String roomName) {
-		patchSession(roomName, "{"
-				+ "\"punch_status\":\"established\","
-				+ "\"last_error_code\":\"\""
-				+ "}", "Failed to mark host punch established");
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("punch_status", "established")
+						.addString("last_error_code", "")
+						.build(),
+				"Failed to mark host punch established"
+		);
 	}
 
 	public static void markHostPunchDown(String roomName) {
@@ -151,18 +174,26 @@ public final class SupabaseQuicSessionClient {
 		if (normalizedErrorCode.length() > 64) {
 			normalizedErrorCode = normalizedErrorCode.substring(0, 64);
 		}
-		patchSession(roomName, "{"
-				+ "\"punch_status\":\"down\","
-				+ "\"last_error_code\":\"" + SupabaseJsonUtil.escape(normalizedErrorCode) + "\""
-				+ "}", "Failed to mark host punch down");
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("punch_status", "down")
+						.addString("last_error_code", normalizedErrorCode)
+						.build(),
+				"Failed to mark host punch down"
+		);
 	}
 
 	public static void markRouteDecisionQuicTry(String roomName) {
-		patchSession(roomName, "{"
-				+ "\"route_decision\":\"quic_try\","
-				+ "\"relay_reason\":\"\","
-				+ "\"route_decided_at\":\"" + Instant.now() + "\""
-				+ "}", "Failed to mark route decision");
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("route_decision", "quic_try")
+						.addString("relay_reason", "")
+						.addString("route_decided_at", Instant.now().toString())
+						.build(),
+				"Failed to mark route decision"
+		);
 	}
 
 	public static void upsertPeerAttempt(
@@ -175,43 +206,46 @@ public final class SupabaseQuicSessionClient {
 			String lastErrorCode,
 			boolean closed
 	) {
-		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
-		String supabaseUrl = runtimeConfig.supabaseUrl();
-		String supabaseKey = runtimeConfig.supabaseApiKey();
-		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank() || clientKey.isBlank() || attemptId.isBlank()) {
+		Optional<SupabaseAuth> auth = loadAuth();
+		if (auth.isEmpty() || roomName.isBlank() || clientKey.isBlank() || attemptId.isBlank()) {
 			return;
 		}
+		SupabaseAuth loadedAuth = auth.get();
 
-		String endpoint = supabaseUrl + "/rest/v1/quic_peer_attempts";
+		String endpoint = loadedAuth.supabaseUrl() + SupabaseApiPaths.QUIC_PEER_ATTEMPTS;
 		String now = Instant.now().toString();
-		String body = "{"
-				+ "\"room_name\":\"" + SupabaseJsonUtil.escape(roomName) + "\","
-				+ "\"client_key\":\"" + SupabaseJsonUtil.escape(clientKey) + "\","
-				+ "\"attempt_id\":\"" + SupabaseJsonUtil.escape(attemptId) + "\","
-				+ "\"client_nat_type\":\"" + SupabaseJsonUtil.escape(normalizeNatType(clientNatType)) + "\","
-				+ "\"decision\":\"" + SupabaseJsonUtil.escape(decision == null ? "" : decision) + "\","
-				+ "\"punch_status\":\"" + SupabaseJsonUtil.escape(punchStatus == null ? "" : punchStatus) + "\","
-				+ "\"last_error_code\":\"" + SupabaseJsonUtil.escape(lastErrorCode == null ? "" : lastErrorCode) + "\","
-				+ "\"updated_at\":\"" + now + "\""
-				+ (closed ? ",\"closed_at\":\"" + now + "\"" : "")
-				+ "}";
+		SupabaseJsonObjectBuilder bodyBuilder = new SupabaseJsonObjectBuilder()
+				.addString("room_name", roomName)
+				.addString("client_key", clientKey)
+				.addString("attempt_id", attemptId)
+				.addString("client_nat_type", normalizeNatType(clientNatType))
+				.addString("decision", decision == null ? "" : decision)
+				.addString("punch_status", punchStatus == null ? "" : punchStatus)
+				.addString("last_error_code", lastErrorCode == null ? "" : lastErrorCode)
+				.addString("updated_at", now);
+		if (closed) {
+			bodyBuilder.addString("closed_at", now);
+		}
+		String body = bodyBuilder.build();
 
-		HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-				.timeout(Duration.ofSeconds(4))
-				.header("apikey", supabaseKey)
-				.header("Content-Type", "application/json")
-				.header("Prefer", "resolution=merge-duplicates,return=minimal")
-				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-				.build();
+		HttpRequest request = SupabaseRestClient.buildAuthorizedJsonRequest(
+				endpoint,
+				"POST",
+				loadedAuth.supabaseKey(),
+				body,
+				REQUEST_TIMEOUT,
+				"resolution=merge-duplicates,return=minimal"
+		);
 
 		try {
 			HttpResponse<Void> response = SupabaseRestClient.sendDiscarding(request);
 			int status = response.statusCode();
-			if (status >= 200 && status < 300) {
+			SupabaseRestClient.ResponseCategory category = SupabaseRestClient.classifyPeerAttempts(status);
+			if (category == SupabaseRestClient.ResponseCategory.SUCCESS) {
 				return;
 			}
 
-			if ((status == 400 || status == 404) && !peerAttemptsUnavailableLogged) {
+			if (category == SupabaseRestClient.ResponseCategory.ENDPOINT_UNAVAILABLE && !peerAttemptsUnavailableLogged) {
 				peerAttemptsUnavailableLogged = true;
 				NatTraversalMod.LOGGER.info(
 						"[nat-traversal-mod] quic_peer_attempts endpoint unavailable. status={}",
@@ -248,46 +282,60 @@ public final class SupabaseQuicSessionClient {
 	}
 
 	private static Optional<String> extractAttemptId(String responseBody) {
-		Optional<JsonRegexDtoParser.JsonFieldMatch> match = JsonRegexDtoParser.findFirst(ATTEMPT_ID_PATTERN, responseBody);
-		if (match.isEmpty()) {
-			return Optional.empty();
-		}
-
-		String attemptId = match.get().trimmedValue();
-		if (attemptId.isEmpty()) {
-			return Optional.empty();
-		}
-		return Optional.of(attemptId);
+		return JsonRegexDtoParser.findStringField(responseBody, "attempt_id")
+				.filter(attemptId -> !attemptId.isEmpty());
 	}
 
 
 	private static void patchSession(String roomName, String payload, String errorLogMessage) {
-		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
-		String supabaseUrl = runtimeConfig.supabaseUrl();
-		String supabaseKey = runtimeConfig.supabaseApiKey();
-		if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
+		Optional<SupabaseAuth> auth = loadAuth();
+		if (auth.isEmpty() || roomName.isBlank()) {
 			return;
 		}
+		SupabaseAuth loadedAuth = auth.get();
 
 		String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-		String endpoint = supabaseUrl + "/rest/v1/quic_sessions?room_name=eq." + encodedRoomName;
+		String endpoint = loadedAuth.supabaseUrl() + SupabaseApiPaths.QUIC_SESSIONS + "?room_name=eq." + encodedRoomName;
 
-		HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-				.timeout(Duration.ofSeconds(4))
-				.header("apikey", supabaseKey)
-				.header("Content-Type", "application/json")
-				.header("Prefer", "return=minimal")
-				.method("PATCH", HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
-				.build();
+		HttpRequest request = SupabaseRestClient.buildAuthorizedJsonRequest(
+				endpoint,
+				"PATCH",
+				loadedAuth.supabaseKey(),
+				payload,
+				REQUEST_TIMEOUT,
+				"return=minimal"
+		);
 
 		try {
-			SupabaseRestClient.sendDiscarding(request);
+			HttpResponse<Void> response = SupabaseRestClient.sendDiscarding(request);
+			int status = response.statusCode();
+			if (SupabaseRestClient.classifyDefault(status) != SupabaseRestClient.ResponseCategory.SUCCESS) {
+				NatTraversalMod.LOGGER.info(
+						"[nat-traversal-mod] {}. status={}, room_name='{}'",
+						errorLogMessage,
+						status,
+						roomName
+				);
+			}
 		} catch (IOException | InterruptedException exception) {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
 			}
 			NatTraversalMod.LOGGER.info("[nat-traversal-mod] {}. room_name='{}'", errorLogMessage, roomName, exception);
 		}
+	}
+
+	private static Optional<SupabaseAuth> loadAuth() {
+		RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+		String supabaseUrl = runtimeConfig.supabaseUrl();
+		String supabaseKey = runtimeConfig.supabaseApiKey();
+		if (supabaseUrl.isBlank() || supabaseKey.isBlank()) {
+			return Optional.empty();
+		}
+		return Optional.of(new SupabaseAuth(supabaseUrl, supabaseKey));
+	}
+
+	private record SupabaseAuth(String supabaseUrl, String supabaseKey) {
 	}
 }
 
