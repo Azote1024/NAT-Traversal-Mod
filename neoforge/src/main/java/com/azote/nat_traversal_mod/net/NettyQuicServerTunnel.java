@@ -388,6 +388,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         hostPublishedEndpoint = bindTarget.host() + ":" + bindTarget.port();
         hostObservedPublicEndpoint = resolveHostObservedPublicEndpoint(runtimeConfig, bindTarget, udpChannel);
         hostObservedUpdatedAtMillis = System.currentTimeMillis();
+        SupabaseQuicSessionClient.updateHostPublicEndpoint(roomName, hostObservedPublicEndpoint);
         hostPunchAssistThread = new Thread(() -> runHostPunchAssistLoop(roomName), "nat-quic-host-punch-assist");
         hostPunchAssistThread.setDaemon(true);
         hostPunchAssistThread.start();
@@ -423,7 +424,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             return;
         }
 
-        refreshHostObservedEndpointIfStale(syncInfo);
+        refreshHostObservedEndpointIfStale(roomName, syncInfo);
 
         Optional<RelayEndpoint> parsedClientEndpoint = RelayEndpoint.parse(clientEndpointRaw, "client_public_endpoint");
         if (parsedClientEndpoint.isEmpty()) {
@@ -532,7 +533,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         }
     }
 
-    private void refreshHostObservedEndpointIfStale(SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
+    private void refreshHostObservedEndpointIfStale(String roomName, SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
         if (!hostStunEnabled || hostBindTarget == null || hostStunServer.isBlank()) {
             return;
         }
@@ -561,6 +562,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
                     refreshed
             );
             hostObservedPublicEndpoint = refreshed;
+            SupabaseQuicSessionClient.updateHostPublicEndpoint(roomName, hostObservedPublicEndpoint);
         }
         hostObservedUpdatedAtMillis = System.currentTimeMillis();
     }

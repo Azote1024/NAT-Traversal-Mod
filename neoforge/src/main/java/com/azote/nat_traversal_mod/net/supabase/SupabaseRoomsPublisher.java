@@ -33,6 +33,10 @@ public final class SupabaseRoomsPublisher {
         String endpoint = config.supabaseUrl + SupabaseApiPaths.ROOMS;
         String updatedAt = Instant.now().toString();
         NatClassification natClassification = classifyHostNat(config, hostPort);
+        if (natClassification.publishHostIp().isBlank()) {
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: no publishable host IP. Set publish.host_ip or enable working STUN.");
+            return;
+        }
         String body = buildOpenRoomBody(config, hostPort, updatedAt, natClassification);
 
         RequestResult result = sendJsonRequest(
@@ -184,8 +188,13 @@ public final class SupabaseRoomsPublisher {
             return null;
         }
 
-        if (hostName.isBlank() || hostIp.isBlank()) {
-            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: set publish.host_name and publish.host_ip in config.");
+        if (hostName.isBlank()) {
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: set publish.host_name in config.");
+            return null;
+        }
+
+        if (hostIp.isBlank() && !snapshot.stunEnabled()) {
+            NatTraversalMod.LOGGER.warn("[nat-traversal-mod] Skip room publish: set publish.host_ip in config or enable STUN.");
             return null;
         }
 
@@ -228,6 +237,7 @@ public final class SupabaseRoomsPublisher {
         String body = new SupabaseJsonObjectBuilder()
                 .addString("room_name", config.roomName)
                 .addString("quic_endpoint", config.quicEndpoint)
+                .addString("host_public_endpoint", "")
                 .addString("quic_status", config.quicStatus)
                 .addString("punch_endpoint", defaultPunchEndpoint)
                 .addString("punch_status", "ready")
@@ -263,6 +273,7 @@ public final class SupabaseRoomsPublisher {
         String body = new SupabaseJsonObjectBuilder()
                 .addString("status", "closed")
                 .addString("quic_status", "down")
+                .addString("host_public_endpoint", "")
                 .addString("punch_status", "idle")
                 .addString("punch_token", "")
                 .addString("route_decision", "")
@@ -315,7 +326,7 @@ public final class SupabaseRoomsPublisher {
 
     private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {
         String publishHostIp = config.hostIp;
-        String directEndpoint = publishHostIp + ":" + hostPort;
+        String directEndpoint = publishHostIp.isBlank() ? "" : publishHostIp + ":" + hostPort;
         if (!config.stunEnabled) {
             return new NatClassification("unknown", "", "direct", directEndpoint, publishHostIp);
         }
@@ -340,7 +351,7 @@ public final class SupabaseRoomsPublisher {
         if (stunPublicEndpoint.isEmpty()) {
             NatTraversalMod.LOGGER.warn(
                     "[nat-traversal-mod] STUN endpoint resolve failed. Fallback to direct endpoint='{}'.",
-                    directEndpoint
+                    directEndpoint.isBlank() ? "<empty>" : directEndpoint
             );
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] STUN publish fields prepared. nat_method='{}', public_endpoint='{}'",

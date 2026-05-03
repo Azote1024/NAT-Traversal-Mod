@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 public final class SupabaseQuicSessionClient {
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(4);
 	private static final String QUIC_SESSION_SELECT_RICH =
-			"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_probe_sent_at,attempt_id,last_error_code,host_nat_type,route_decision,relay_reason,status,updated_at";
+			"room_name,quic_endpoint,host_public_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_probe_sent_at,attempt_id,last_error_code,host_nat_type,route_decision,relay_reason,status,updated_at";
 	private static final String QUIC_SESSION_SELECT_FALLBACK =
 			"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_nat_type,route_decision,relay_reason,status,updated_at";
 	private static volatile boolean peerAttemptsUnavailableLogged;
@@ -254,6 +254,21 @@ public final class SupabaseQuicSessionClient {
 						.addString("last_error_code", "")
 						.build(),
 				"Failed to mark host punch probing"
+		);
+	}
+
+	public static void updateHostPublicEndpoint(String roomName, String hostPublicEndpoint) {
+		String normalizedEndpoint = hostPublicEndpoint == null ? "" : hostPublicEndpoint.trim();
+		if (roomName.isBlank() || normalizedEndpoint.isBlank()) {
+			return;
+		}
+		patchSession(
+				roomName,
+				new SupabaseJsonObjectBuilder()
+						.addString("host_public_endpoint", normalizedEndpoint)
+						.addString("updated_at", Instant.now().toString())
+						.build(),
+				"Failed to update host public endpoint"
 		);
 	}
 
