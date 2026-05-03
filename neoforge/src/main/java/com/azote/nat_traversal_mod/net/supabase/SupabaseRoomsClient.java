@@ -55,6 +55,34 @@ public final class SupabaseRoomsClient {
         return resolveFromSnapshot(snapshot.get(), roomName, runtimeConfig);
     }
 
+    public static Optional<ResolvedTarget> resolveForPinger() {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        String supabaseUrl = runtimeConfig.supabaseUrl();
+        String supabaseKey = runtimeConfig.supabaseApiKey();
+        String roomName = runtimeConfig.roomName();
+
+        if (supabaseUrl.isBlank() || supabaseKey.isBlank() || roomName.isBlank()) {
+            return Optional.empty();
+        }
+
+        Optional<String> roomBody = SupabaseRoomsApiClient.fetchOpenRoomBody(supabaseUrl, supabaseKey, roomName);
+        if (roomBody.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Optional<RoomSnapshotParser.RoomSnapshot> snapshot = RoomSnapshotParser.parse(roomBody.get(), roomName);
+        if (snapshot.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Optional<ResolvedTarget> publicTarget = RoomRouteSelector.tryPublicEndpoint(snapshot.get(), roomName, runtimeConfig);
+        if (publicTarget.isPresent()) {
+            return publicTarget;
+        }
+
+        return Optional.of(new ResolvedTarget(snapshot.get().hostIp(), snapshot.get().hostPort()));
+    }
+
     private static Optional<ResolvedTarget> resolveFromSnapshot(
             RoomSnapshotParser.RoomSnapshot snapshot,
             String roomName,

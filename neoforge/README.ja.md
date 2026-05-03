@@ -11,6 +11,7 @@ NeoForge mod プロジェクト単体のビルド/実行ガイドです。
 
 - `../docs/windows-client-ubuntu-server-operations-template.md`
 - `../docs/windows-client-ubuntu-server-operations-template.ja.md`
+- `../docs/tcp-quic-relay-test-procedure.ja.md`（TCP->QUIC->Relay の順次テスト手順）
 
 ## 前提
 

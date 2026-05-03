@@ -28,6 +28,7 @@
 - Supabase単体（日本語）: `supabase/README.ja.md`
 - 運用テンプレ（Windows client + Ubuntu server）: `docs/windows-client-ubuntu-server-operations-template.md`
 - 運用テンプレ（日本語）: `docs/windows-client-ubuntu-server-operations-template.ja.md`
+- 接続経路テスト手順（日本語）: `docs/tcp-quic-relay-test-procedure.ja.md`
 
 ## クイックスタート（管理者）
 

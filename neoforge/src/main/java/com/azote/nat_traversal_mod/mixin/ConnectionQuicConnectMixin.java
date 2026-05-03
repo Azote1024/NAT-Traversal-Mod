@@ -2,6 +2,8 @@ package com.azote.nat_traversal_mod.mixin;
 
 import com.azote.nat_traversal_mod.net.ConnectFallbackPolicy;
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
+import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import com.azote.nat_traversal_mod.net.QuicDirectConnectorFactory;
 import com.azote.nat_traversal_mod.net.routing.QuicDirectRouteContext;
 import io.netty.channel.ChannelFuture;
@@ -45,6 +47,12 @@ public class ConnectionQuicConnectMixin {
             return;
         }
 
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        if (!runtimeConfig.quicEnabled()) {
+            NatTraversalMod.LOGGER.info("[nat-traversal-mod] quic.enabled=false. skip QUIC direct path and keep TCP connect path.");
+            return;
+        }
+
         String attemptId = pendingRoute.get().attemptId();
         Optional<ChannelFuture> quicFuture = QuicDirectConnectorFactory.connect(address, useEpoll, connection, attemptId);
         if (quicFuture.isPresent()) {
@@ -84,7 +92,7 @@ public class ConnectionQuicConnectMixin {
 
         if (fallbackDecision.route() == ConnectFallbackPolicy.Route.ORIGINAL_TCP) {
             NatTraversalMod.LOGGER.info(
-                    "[nat-traversal-mod] QUIC direct failed. fallback to original TCP target='{}:{}'",
+                    "[nat-traversal-mod] QUIC direct failed. fallback to resolved TCP target='{}:{}'",
                     fallbackDecision.target().getHostString(),
                     fallbackDecision.target().getPort()
             );

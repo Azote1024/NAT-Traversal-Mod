@@ -17,6 +17,7 @@ import java.util.Optional;
 
 public final class ServerNameResolverHook {
     private static final String SERVER_CONNECTOR_THREAD_PREFIX = "Server Connector";
+    private static final String SERVER_PINGER_THREAD_PREFIX = "Server Pinger";
 
     private record PlannedStageResult(boolean stopRoomResolve, Optional<ResolvedServerAddress> resolvedAddress) {
     }
@@ -25,8 +26,9 @@ public final class ServerNameResolverHook {
     }
 
     public static Optional<ResolvedServerAddress> resolveAddressOverride(ServerAddress address) {
-        // Keep pinger and other non-connect paths out of NAT route orchestration.
-        if (!isServerConnectorThread()) {
+        boolean connectorThread = isServerConnectorThread();
+        boolean pingerThread = isServerPingerThread();
+        if (!connectorThread && !pingerThread) {
             return Optional.empty();
         }
 
@@ -43,10 +45,23 @@ public final class ServerNameResolverHook {
         }
 
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] Intercept hit. host='{}', room_name='{}'",
+                "[nat-traversal-mod] Intercept hit. host='{}', room_name='{}', thread='{}'",
                 requestedHost,
-                runtimeConfig.roomName()
+                runtimeConfig.roomName(),
+                Thread.currentThread().getName()
         );
+
+        if (pingerThread) {
+            Optional<ResolvedTarget> pingerTarget = SupabaseRoomsClient.resolveForPinger();
+            if (pingerTarget.isEmpty()) {
+                NatTraversalMod.LOGGER.info(
+                        "[nat-traversal-mod] Pinger room resolve unavailable. keep original target. host='{}'",
+                        requestedHost
+                );
+                return Optional.empty();
+            }
+            return Optional.of(resolveForDisplayOnly(requestedHost, runtimeConfig, pingerTarget.get()));
+        }
 
         if (runtimeConfig.connectStrategy() == ConnectStrategy.TCP_QUIC_RELAY) {
             PlannedStageResult stageResult = handlePlannedStage(requestedHost, requestedPort, runtimeConfig);
@@ -162,10 +177,28 @@ public final class ServerNameResolverHook {
         );
 
         String attemptId = QuicDirectRouteContext.currentAttemptId().orElse("");
-        InetSocketAddress fallbackTarget = new InetSocketAddress(requestedHost, requestedPort);
+        InetSocketAddress fallbackTarget = new InetSocketAddress(connectHost, target.hostPort());
         QuicDirectRouteContext.set(new RelayEndpoint(connectHost, target.hostPort()), attemptId, fallbackTarget);
 
         notifyPlayerIfConnectAttempt("[NAT] Route resolved: " + connectHost + ":" + target.hostPort());
+        return ResolvedServerAddress.from(new InetSocketAddress(connectHost, target.hostPort()));
+    }
+
+    private static ResolvedServerAddress resolveForDisplayOnly(
+            String requestedHost,
+            RuntimeConfigSnapshot runtimeConfig,
+            ResolvedTarget target
+    ) {
+        String connectHost = target.hostIp();
+        if (runtimeConfig.debugForceLocalhost() || isLoopbackHost(requestedHost)) {
+            connectHost = "127.0.0.1";
+        }
+        NatTraversalMod.LOGGER.info(
+                "[nat-traversal-mod] Pinger resolved room target. {}:{} (debug_force_localhost={})",
+                connectHost,
+                target.hostPort(),
+                runtimeConfig.debugForceLocalhost()
+        );
         return ResolvedServerAddress.from(new InetSocketAddress(connectHost, target.hostPort()));
     }
 
@@ -224,6 +257,10 @@ public final class ServerNameResolverHook {
 
     private static boolean isServerConnectorThread() {
         return Thread.currentThread().getName().startsWith(SERVER_CONNECTOR_THREAD_PREFIX);
+    }
+
+    private static boolean isServerPingerThread() {
+        return Thread.currentThread().getName().startsWith(SERVER_PINGER_THREAD_PREFIX);
     }
 }
 
