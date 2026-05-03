@@ -59,6 +59,22 @@ public final class StunClient {
         }
     }
 
+    static Optional<InetSocketAddress> resolveServerAddress(String stunServer) {
+        ServerSpec serverSpec = parseServerSpec(stunServer);
+        if (serverSpec == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new InetSocketAddress(serverSpec.host(), serverSpec.port()));
+    }
+
+    static byte[] createBindingRequest(byte[] txId) {
+        return buildBindingRequest(txId);
+    }
+
+    static Optional<String> parseBindingResponseForTxId(byte[] packet, int length, byte[] expectedTxId) {
+        return parseBindingResponse(packet, length, expectedTxId);
+    }
+
     private static boolean isUnresolvedAddress(IOException exception) {
         if (exception.getMessage() != null && exception.getMessage().contains("Unresolved address")) {
             return true;

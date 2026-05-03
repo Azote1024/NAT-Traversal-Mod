@@ -7,6 +7,7 @@ import com.azote.nat_traversal_mod.net.routing.QuicDirectRouteContext;
 import io.netty.channel.ChannelFuture;
 import net.minecraft.network.Connection;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -16,8 +17,15 @@ import java.util.Optional;
 
 @Mixin(Connection.class)
 public class ConnectionQuicConnectMixin {
+    @Unique
+    private static final String SERVER_CONNECTOR_THREAD_PREFIX = "Server Connector";
+
     @Inject(method = "connect(Ljava/net/InetSocketAddress;ZLnet/minecraft/network/Connection;)Lio/netty/channel/ChannelFuture;", at = @At("HEAD"), cancellable = true)
     private static void natTraversalMod$connectQuic(InetSocketAddress address, boolean useEpoll, Connection connection, CallbackInfoReturnable<ChannelFuture> cir) {
+        if (!Thread.currentThread().getName().startsWith(SERVER_CONNECTOR_THREAD_PREFIX)) {
+            return;
+        }
+
         NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] Connection.connect hook fired. target='{}:{}', useEpoll={}",
                 address.getHostString(),
@@ -46,6 +54,12 @@ public class ConnectionQuicConnectMixin {
                     address.getHostString(),
                     address.getPort()
             );
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] route_result='quic_direct_selected' attempt_id='{}' target='{}:{}'",
+                    attemptId,
+                    address.getHostString(),
+                    address.getPort()
+            );
             cir.setReturnValue(quicFuture.get());
             return;
         }
@@ -55,6 +69,12 @@ public class ConnectionQuicConnectMixin {
         if (fallbackDecision.route() == ConnectFallbackPolicy.Route.RELAY) {
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] QUIC fallback route selected: relay connector target='{}:{}'",
+                    fallbackDecision.target().getHostString(),
+                    fallbackDecision.target().getPort()
+            );
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] route_result='relay_selected' attempt_id='{}' target='{}:{}'",
+                    attemptId,
                     fallbackDecision.target().getHostString(),
                     fallbackDecision.target().getPort()
             );
@@ -68,10 +88,22 @@ public class ConnectionQuicConnectMixin {
                     fallbackDecision.target().getHostString(),
                     fallbackDecision.target().getPort()
             );
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] route_result='original_tcp_selected' attempt_id='{}' target='{}:{}'",
+                    attemptId,
+                    fallbackDecision.target().getHostString(),
+                    fallbackDecision.target().getPort()
+            );
             cir.setReturnValue(Connection.connect(fallbackDecision.target(), useEpoll, connection));
             return;
         }
 
+        NatTraversalMod.LOGGER.info(
+                "[nat-traversal-mod] route_result='fallback_unavailable' attempt_id='{}' target='{}:{}'",
+                attemptId,
+                address.getHostString(),
+                address.getPort()
+        );
         NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay/TCP fallback unavailable. fallback to TCP connect path.");
     }
 }

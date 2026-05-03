@@ -12,6 +12,7 @@ public final class RuntimeConfigLoader {
         return new RuntimeConfigSnapshot(
                 normalizeConnectStrategy(Config.modeConnectStrategy()),
                 Config.modeInterceptHost(),
+                Config.modeDebugForceLocalhost(),
                 Config.modeRoomName(),
                 Config.supabaseUrl(),
                 Config.supabaseApiKey(),

@@ -21,6 +21,17 @@ final class QuicAttemptRecorder {
                 "",
                 false
         );
+        SupabaseQuicSessionClient.upsertPeerAttemptSync(
+                roomName,
+                clientKey,
+                attemptId,
+                "",
+                "",
+                "",
+                "",
+                0,
+                "attempt_started"
+        );
         return attemptId;
     }
 

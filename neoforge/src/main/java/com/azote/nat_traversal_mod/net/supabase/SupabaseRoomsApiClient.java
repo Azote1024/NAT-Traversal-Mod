@@ -16,7 +16,7 @@ final class SupabaseRoomsApiClient {
 
     static Optional<String> fetchOpenRoomBody(String supabaseUrl, String supabaseKey, String roomName) {
         String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
-        String endpoint = supabaseUrl + SupabaseApiPaths.ROOMS + "?select=host_ip,host_port,public_endpoint,relay_endpoint,relay_status,candidates,updated_at"
+        String endpoint = supabaseUrl + SupabaseApiPaths.ROOMS + "?select=host_ip,host_port,host_nat_type,public_endpoint,relay_endpoint,relay_status,candidates,updated_at"
                 + "&room_name=eq." + encodedRoomName
                 + "&status=eq.open";
 

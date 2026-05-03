@@ -25,6 +25,9 @@ For full stack setup, see:
 - `migrations/20260503152000_nat_routing_phase1.sql`
   - extends `public.rooms` and `public.quic_sessions` with NAT routing metadata
   - creates `public.quic_peer_attempts` for client-scoped attempt records
+- `migrations/20260503190000_quic_peer_attempts_punch_sync_phase1.sql`
+  - extends `public.quic_peer_attempts` with punch sync metadata
+  - adds per-attempt fields for client endpoint, sync token, and punch window observability
 
 ## Current Schema Scope
 

@@ -4,6 +4,7 @@ import com.azote.nat_traversal_mod.NatTraversalMod;
 import com.azote.nat_traversal_mod.config.runtime.QuicTlsMode;
 import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
 import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
+import com.azote.nat_traversal_mod.net.supabase.SupabaseQuicSessionClient;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -27,6 +28,8 @@ import net.minecraft.network.protocol.PacketFlow;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -78,15 +81,28 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
                 toDisplayTlsMode(runtimeConfig.quicTlsMode())
         );
 
-        sendPreConnectPunch(udpChannel, address, roomName, normalizedAttemptId);
+        sendPreConnectPunch(udpChannel, address, roomName, normalizedAttemptId, runtimeConfig);
 
         io.netty.util.concurrent.Future<QuicChannel> quicConnectFuture = QuicChannel.newBootstrap(udpChannel)
                 .streamHandler(new ChannelInboundHandlerAdapter())
                 .remoteAddress(address)
                 .connect();
 
-        if (!quicConnectFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !quicConnectFuture.isSuccess()) {
-            String errorCode = QuicErrorCodes.classifyDirectConnectError(quicConnectFuture.cause());
+        boolean connectCompleted = quicConnectFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS);
+        if (!connectCompleted || !quicConnectFuture.isSuccess()) {
+            String errorCode = !connectCompleted
+                    ? QuicErrorCodes.NO_RETURN_TRAFFIC
+                    : QuicErrorCodes.classifyDirectConnectError(quicConnectFuture.cause());
+            SupabaseQuicSessionClient.upsertPeerAttempt(
+                    roomName,
+                    QuicP2pManager.clientKey(),
+                    normalizedAttemptId,
+                    "unknown",
+                    "quic_try",
+                    "down",
+                    errorCode,
+                    false
+            );
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_CHANNEL_CONNECT_FAILED
                             + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
@@ -119,6 +135,16 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
 
         if (!streamFuture.awaitUninterruptibly(CONNECT_TIMEOUT_MILLIS) || !streamFuture.isSuccess()) {
             String errorCode = QuicErrorCodes.classifyDirectStreamError(streamFuture.cause());
+            SupabaseQuicSessionClient.upsertPeerAttempt(
+                    roomName,
+                    QuicP2pManager.clientKey(),
+                    normalizedAttemptId,
+                    "unknown",
+                    "quic_try",
+                    "down",
+                    errorCode,
+                    false
+            );
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_STREAM_CREATE_FAILED
                             + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
@@ -156,23 +182,108 @@ final class NettyQuicDirectConnector implements QuicDirectConnector {
         return Optional.of(stream.newSucceededFuture());
     }
 
-    private static void sendPreConnectPunch(io.netty.channel.Channel udpChannel, InetSocketAddress address, String roomName, String attemptId) {
-        String payload = "NAT-PUNCH " + roomName + " " + attemptId + " preconnect";
+    private static void sendPreConnectPunch(
+            io.netty.channel.Channel udpChannel,
+            InetSocketAddress address,
+            String roomName,
+            String attemptId,
+            RuntimeConfigSnapshot runtimeConfig
+    ) {
+        String clientKey = QuicP2pManager.clientKey();
+        Optional<SupabaseQuicSessionClient.PeerPunchSyncInfo> syncInfo =
+                SupabaseQuicSessionClient.fetchPeerPunchSyncInfo(roomName, clientKey, attemptId);
+
+        String clientPublicEndpoint = syncInfo.map(SupabaseQuicSessionClient.PeerPunchSyncInfo::clientPublicEndpoint).orElse("");
+        if (runtimeConfig.stunEnabled()) {
+            Optional<String> probedEndpoint = QuicSocketStunProbe.resolvePublicEndpoint(
+                    udpChannel,
+                    runtimeConfig.stunServer(),
+                    runtimeConfig.stunTimeoutMs()
+            );
+            if (probedEndpoint.isPresent()) {
+                clientPublicEndpoint = probedEndpoint.get();
+                if (syncInfo.isPresent()) {
+                    SupabaseQuicSessionClient.PeerPunchSyncInfo value = syncInfo.get();
+                    SupabaseQuicSessionClient.upsertPeerAttemptSync(
+                            roomName,
+                            clientKey,
+                            attemptId,
+                            clientPublicEndpoint,
+                            "",
+                            value.punchSyncToken(),
+                            value.punchWindowOpenedAt(),
+                            value.punchWindowMs(),
+                            "client_socket_public_endpoint_updated"
+                    );
+                    syncInfo = Optional.of(new SupabaseQuicSessionClient.PeerPunchSyncInfo(
+                            value.clientKey(),
+                            clientPublicEndpoint,
+                            value.attemptId(),
+                            value.punchSyncToken(),
+                            value.punchWindowOpenedAt(),
+                            value.punchWindowMs(),
+                            value.lastTransition()
+                    ));
+                }
+            }
+        }
+
+        if (syncInfo.isPresent()) {
+            waitUntilPunchWindow(syncInfo.get());
+        }
+
+        String syncToken = syncInfo.map(SupabaseQuicSessionClient.PeerPunchSyncInfo::punchSyncToken).orElse("");
+        String payload = "NAT-PUNCH " + roomName + " " + attemptId + " " + syncToken + " preconnect";
         byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
         for (int i = 0; i < 3; i++) {
             DatagramPacket packet = new DatagramPacket(Unpooled.wrappedBuffer(bytes), address);
             udpChannel.writeAndFlush(packet).syncUninterruptibly();
         }
 
+        QuicAttemptRecorder.markPunchSent(roomName, clientKey, attemptId);
+        if (syncInfo.isPresent()) {
+            SupabaseQuicSessionClient.PeerPunchSyncInfo value = syncInfo.get();
+            SupabaseQuicSessionClient.upsertPeerAttemptSync(
+                    roomName,
+                    clientKey,
+                    attemptId,
+                    clientPublicEndpoint,
+                    "",
+                    value.punchSyncToken(),
+                    value.punchWindowOpenedAt(),
+                    value.punchWindowMs(),
+                    "punch_sent_socket_shared"
+            );
+        }
+
         NatTraversalMod.LOGGER.info(
                 "[nat-traversal-mod] quic_direct " + QuicLogSchema.FIELD_PHASE + "=" + QuicLogSchema.PHASE_PRE_PUNCH_SENT
                         + " " + QuicLogSchema.FIELD_ROOM_NAME + "='{}' " + QuicLogSchema.FIELD_ATTEMPT_ID + "='{}' "
-                        + QuicLogSchema.FIELD_TARGET + "='{}:{}' count=3",
+                        + QuicLogSchema.FIELD_TARGET + "='{}:{}' sync_token_present={} count=3",
                 roomName,
                 attemptId,
                 address.getHostString(),
-                address.getPort()
+                address.getPort(),
+                !syncToken.isBlank()
         );
+    }
+
+    private static void waitUntilPunchWindow(SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
+        String openedAtValue = syncInfo.punchWindowOpenedAt();
+        if (openedAtValue == null || openedAtValue.isBlank()) {
+            return;
+        }
+        try {
+            Instant openedAt = Instant.parse(openedAtValue);
+            long waitMillis = openedAt.toEpochMilli() - System.currentTimeMillis();
+            if (waitMillis > 0L) {
+                Thread.sleep(Math.min(waitMillis, 1000L));
+            }
+        } catch (DateTimeParseException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private static void applyClientTlsMode(RuntimeConfigSnapshot runtimeConfig, QuicSslContextBuilder sslBuilder) {

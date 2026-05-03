@@ -23,6 +23,9 @@ Supabase はシグナリング情報（`public.rooms`）の保存にのみ使用
 - `migrations/20260503152000_nat_routing_phase1.sql`
   - `public.rooms` / `public.quic_sessions` に NAT routing 列を追加
   - `public.quic_peer_attempts`（クライアント単位試行記録）を新設
+- `migrations/20260503190000_quic_peer_attempts_punch_sync_phase1.sql`
+  - `public.quic_peer_attempts` に punch 同期メタ列を追加
+  - クライアント公開endpoint・同期トークン・パンチウィンドウ観測列を導入
 
 ## 現在のスキーマ範囲
 

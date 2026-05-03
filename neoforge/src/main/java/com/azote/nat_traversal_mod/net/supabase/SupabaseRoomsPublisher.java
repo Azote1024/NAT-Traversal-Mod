@@ -1,6 +1,7 @@
 package com.azote.nat_traversal_mod.net.supabase;
 
 import com.azote.nat_traversal_mod.NatTraversalMod;
+import com.azote.nat_traversal_mod.net.RelayEndpoint;
 import com.azote.nat_traversal_mod.net.StunClient;
 
 import java.io.IOException;
@@ -46,7 +47,7 @@ public final class SupabaseRoomsPublisher {
             NatTraversalMod.LOGGER.info(
                     "[nat-traversal-mod] Room published. room_name='{}' -> {}:{}",
                     config.roomName,
-                    config.hostIp,
+                    natClassification.publishHostIp(),
                     hostPort
             );
             publishQuicSession(config, hostPort, updatedAt, natClassification);
@@ -135,7 +136,7 @@ public final class SupabaseRoomsPublisher {
         return new SupabaseJsonObjectBuilder()
                 .addString("room_name", config.roomName)
                 .addString("host_name", config.hostName)
-                .addString("host_ip", config.hostIp)
+                .addString("host_ip", natClassification.publishHostIp())
                 .addNumber("host_port", hostPort)
                 .addString("status", "open")
                 .addString("updated_at", updatedAt)
@@ -148,12 +149,12 @@ public final class SupabaseRoomsPublisher {
                 .addString("relay_status", config.relayStatus)
                 .addString("nat_method", natClassification.natMethod())
                 .addString("public_endpoint", natClassification.publicEndpoint())
-                .addRawJson("candidates", buildCandidatesJson(config, hostPort))
+                .addRawJson("candidates", buildCandidatesJson(config, hostPort, natClassification.publishHostIp()))
                 .build();
     }
 
-    private static String buildCandidatesJson(PublishConfig config, int hostPort) {
-        String directEndpoint = config.hostIp + ":" + hostPort;
+    private static String buildCandidatesJson(PublishConfig config, int hostPort, String publishHostIp) {
+        String directEndpoint = publishHostIp + ":" + hostPort;
         return new SupabaseJsonObjectBuilder()
                 .addString("direct_endpoint", directEndpoint)
                 .addString("quic_endpoint", config.quicEndpoint)
@@ -220,7 +221,7 @@ public final class SupabaseRoomsPublisher {
 
     private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
         String endpoint = config.supabaseUrl + SupabaseApiPaths.QUIC_SESSIONS;
-        String defaultPunchEndpoint = config.hostIp + ":" + hostPort;
+        String defaultPunchEndpoint = natClassification.publishHostIp() + ":" + hostPort;
         String punchToken = buildPunchToken(config.roomName, updatedAt);
         String routeDecision = "quic_try";
         String relayReason = "";
@@ -313,13 +314,29 @@ public final class SupabaseRoomsPublisher {
     }
 
     private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {
-        String directEndpoint = config.hostIp + ":" + hostPort;
+        String publishHostIp = config.hostIp;
+        String directEndpoint = publishHostIp + ":" + hostPort;
         if (!config.stunEnabled) {
-            return new NatClassification("unknown", "", "direct", directEndpoint);
+            return new NatClassification("unknown", "", "direct", directEndpoint, publishHostIp);
         }
 
         Optional<String> stunPublicEndpoint = StunClient.resolvePublicEndpoint(config.stunServer, config.stunTimeoutMs);
         String publicEndpoint = stunPublicEndpoint.orElse(directEndpoint);
+        if (stunPublicEndpoint.isPresent()) {
+            Optional<RelayEndpoint> parsed = RelayEndpoint.parse(stunPublicEndpoint.get(), "stun.public_endpoint");
+            if (parsed.isPresent()) {
+                String stunHost = parsed.get().host();
+                if (!stunHost.isBlank() && !stunHost.equalsIgnoreCase(publishHostIp)) {
+                    NatTraversalMod.LOGGER.info(
+                            "[nat-traversal-mod] STUN public IP resolved. override host_ip from '{}' to '{}'.",
+                            publishHostIp,
+                            stunHost
+                    );
+                    publishHostIp = stunHost;
+                }
+            }
+        }
+
         if (stunPublicEndpoint.isEmpty()) {
             NatTraversalMod.LOGGER.warn(
                     "[nat-traversal-mod] STUN endpoint resolve failed. Fallback to direct endpoint='{}'.",
@@ -330,7 +347,7 @@ public final class SupabaseRoomsPublisher {
                     "direct",
                     publicEndpoint
             );
-            return new NatClassification("unknown", "", "direct", publicEndpoint);
+            return new NatClassification("unknown", "", "direct", publicEndpoint, publishHostIp);
         }
 
         String natMethod = publicEndpoint.equals(directEndpoint) ? "direct" : "stun";
@@ -339,10 +356,10 @@ public final class SupabaseRoomsPublisher {
                 natMethod,
                 publicEndpoint
         );
-        return new NatClassification("unknown", "", natMethod, publicEndpoint);
+        return new NatClassification("unknown", "", natMethod, publicEndpoint, publishHostIp);
     }
 
-    private record NatClassification(String hostNatType, String natConfidence, String natMethod, String publicEndpoint) {
+    private record NatClassification(String hostNatType, String natConfidence, String natMethod, String publicEndpoint, String publishHostIp) {
     }
 }
 

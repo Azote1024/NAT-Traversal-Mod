@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class SupabaseQuicSessionClient {
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(4);
@@ -20,6 +22,7 @@ public final class SupabaseQuicSessionClient {
 	private static final String QUIC_SESSION_SELECT_FALLBACK =
 			"room_name,quic_endpoint,quic_status,punch_endpoint,punch_status,punch_token,host_nat_type,route_decision,relay_reason,status,updated_at";
 	private static volatile boolean peerAttemptsUnavailableLogged;
+	private static final Pattern PUNCH_WINDOW_MS_PATTERN = Pattern.compile("\"punch_window_ms\"\\s*:\\s*(\\d+)");
 
 	private SupabaseQuicSessionClient() {
 	}
@@ -118,6 +121,106 @@ public final class SupabaseQuicSessionClient {
 		return fetchSessionBody(roomName).flatMap(SupabaseQuicSessionClient::extractAttemptId);
 	}
 
+	public static Optional<PeerPunchSyncInfo> fetchLatestPeerPunchSyncInfo(String roomName) {
+		Optional<SupabaseAuth> auth = loadAuth();
+		if (auth.isEmpty() || roomName.isBlank()) {
+			return Optional.empty();
+		}
+
+		SupabaseAuth loadedAuth = auth.get();
+		String encodedRoomName = URLEncoder.encode(roomName, StandardCharsets.UTF_8);
+		String endpoint = loadedAuth.supabaseUrl()
+				+ SupabaseApiPaths.QUIC_PEER_ATTEMPTS
+				+ "?select=client_key,client_public_endpoint,attempt_id,punch_sync_token,punch_window_opened_at,punch_window_ms,last_transition"
+				+ "&room_name=eq." + encodedRoomName
+				+ "&order=updated_at.desc"
+				+ "&limit=1";
+
+		HttpRequest request = SupabaseRestClient.buildAuthorizedGetJsonRequest(endpoint, loadedAuth.supabaseKey(), REQUEST_TIMEOUT);
+		try {
+			HttpResponse<String> response = SupabaseRestClient.sendString(request);
+			int status = response.statusCode();
+			SupabaseRestClient.ResponseCategory category = SupabaseRestClient.classifyPeerAttempts(status);
+			if (category != SupabaseRestClient.ResponseCategory.SUCCESS) {
+				if (category == SupabaseRestClient.ResponseCategory.ENDPOINT_UNAVAILABLE && !peerAttemptsUnavailableLogged) {
+					peerAttemptsUnavailableLogged = true;
+					NatTraversalMod.LOGGER.info(
+							"[nat-traversal-mod] quic_peer_attempts endpoint unavailable for punch sync query. status={}",
+							status
+					);
+				}
+				return Optional.empty();
+			}
+
+			String body = response.body();
+			Optional<String> clientEndpoint = JsonRegexDtoParser.findStringField(body, "client_public_endpoint");
+			if (clientEndpoint.isEmpty() || clientEndpoint.get().isBlank()) {
+				return Optional.empty();
+			}
+
+			String attemptId = JsonRegexDtoParser.findStringField(body, "attempt_id").orElse("");
+			String clientKey = JsonRegexDtoParser.findStringField(body, "client_key").orElse("");
+			String syncToken = JsonRegexDtoParser.findStringField(body, "punch_sync_token").orElse("");
+			String windowOpenedAt = JsonRegexDtoParser.findStringField(body, "punch_window_opened_at").orElse("");
+			String lastTransition = JsonRegexDtoParser.findStringField(body, "last_transition").orElse("");
+			int windowMs = parseWindowMs(body);
+			return Optional.of(new PeerPunchSyncInfo(clientKey, clientEndpoint.get(), attemptId, syncToken, windowOpenedAt, windowMs, lastTransition));
+		} catch (IOException | InterruptedException exception) {
+			if (exception instanceof InterruptedException) {
+				Thread.currentThread().interrupt();
+			}
+			NatTraversalMod.LOGGER.info(
+					"[nat-traversal-mod] quic_peer_attempts punch sync query exception. room_name='{}'",
+					roomName,
+					exception
+			);
+			return Optional.empty();
+		}
+	}
+
+	public static Optional<PeerPunchSyncInfo> fetchPeerPunchSyncInfo(String roomName, String clientKey, String attemptId) {
+		Optional<SupabaseAuth> auth = loadAuth();
+		if (auth.isEmpty() || roomName.isBlank() || clientKey.isBlank() || attemptId.isBlank()) {
+			return Optional.empty();
+		}
+
+		SupabaseAuth loadedAuth = auth.get();
+		String endpoint = loadedAuth.supabaseUrl()
+				+ SupabaseApiPaths.QUIC_PEER_ATTEMPTS
+				+ "?select=client_key,client_public_endpoint,attempt_id,punch_sync_token,punch_window_opened_at,punch_window_ms,last_transition"
+				+ "&room_name=eq." + URLEncoder.encode(roomName, StandardCharsets.UTF_8)
+				+ "&client_key=eq." + URLEncoder.encode(clientKey, StandardCharsets.UTF_8)
+				+ "&attempt_id=eq." + URLEncoder.encode(attemptId, StandardCharsets.UTF_8)
+				+ "&limit=1";
+
+		HttpRequest request = SupabaseRestClient.buildAuthorizedGetJsonRequest(endpoint, loadedAuth.supabaseKey(), REQUEST_TIMEOUT);
+		try {
+			HttpResponse<String> response = SupabaseRestClient.sendString(request);
+			int status = response.statusCode();
+			SupabaseRestClient.ResponseCategory category = SupabaseRestClient.classifyPeerAttempts(status);
+			if (category != SupabaseRestClient.ResponseCategory.SUCCESS) {
+				return Optional.empty();
+			}
+
+			String body = response.body();
+			Optional<String> clientEndpoint = JsonRegexDtoParser.findStringField(body, "client_public_endpoint");
+			if (clientEndpoint.isEmpty()) {
+				return Optional.empty();
+			}
+
+			String syncToken = JsonRegexDtoParser.findStringField(body, "punch_sync_token").orElse("");
+			String windowOpenedAt = JsonRegexDtoParser.findStringField(body, "punch_window_opened_at").orElse("");
+			String lastTransition = JsonRegexDtoParser.findStringField(body, "last_transition").orElse("");
+			int windowMs = parseWindowMs(body);
+			return Optional.of(new PeerPunchSyncInfo(clientKey, clientEndpoint.get(), attemptId, syncToken, windowOpenedAt, windowMs, lastTransition));
+		} catch (IOException | InterruptedException exception) {
+			if (exception instanceof InterruptedException) {
+				Thread.currentThread().interrupt();
+			}
+			return Optional.empty();
+		}
+	}
+
 	public static void markClientAttemptStarted(String roomName, String attemptId) {
 		patchSession(
 				roomName,
@@ -185,10 +288,18 @@ public final class SupabaseQuicSessionClient {
 	}
 
 	public static void markRouteDecisionQuicTry(String roomName) {
+		markRouteDecision(roomName, "quic_try");
+	}
+
+	public static void markRouteDecisionRelayForced(String roomName) {
+		markRouteDecision(roomName, "relay_forced");
+	}
+
+	private static void markRouteDecision(String roomName, String decision) {
 		patchSession(
 				roomName,
 				new SupabaseJsonObjectBuilder()
-						.addString("route_decision", "quic_try")
+						.addString("route_decision", decision)
 						.addString("relay_reason", "")
 						.addString("route_decided_at", Instant.now().toString())
 						.build(),
@@ -251,6 +362,8 @@ public final class SupabaseQuicSessionClient {
 						"[nat-traversal-mod] quic_peer_attempts endpoint unavailable. status={}",
 						status
 				);
+			}
+			if (category == SupabaseRestClient.ResponseCategory.ENDPOINT_UNAVAILABLE) {
 				return;
 			}
 
@@ -273,6 +386,88 @@ public final class SupabaseQuicSessionClient {
 		}
 	}
 
+	public static void upsertPeerAttemptSync(
+			String roomName,
+			String clientKey,
+			String attemptId,
+			String clientPublicEndpoint,
+			String hostPublicEndpoint,
+			String punchSyncToken,
+			String punchWindowOpenedAt,
+			int punchWindowMs,
+			String lastTransition
+	) {
+		Optional<SupabaseAuth> auth = loadAuth();
+		if (auth.isEmpty() || roomName.isBlank() || clientKey.isBlank() || attemptId.isBlank()) {
+			return;
+		}
+
+		SupabaseAuth loadedAuth = auth.get();
+		String endpoint = loadedAuth.supabaseUrl() + SupabaseApiPaths.QUIC_PEER_ATTEMPTS;
+		String now = Instant.now().toString();
+		SupabaseJsonObjectBuilder bodyBuilder = new SupabaseJsonObjectBuilder()
+				.addString("room_name", roomName)
+				.addString("client_key", clientKey)
+				.addString("attempt_id", attemptId)
+				.addString("client_public_endpoint", clientPublicEndpoint == null ? "" : clientPublicEndpoint)
+				.addString("host_public_endpoint", hostPublicEndpoint == null ? "" : hostPublicEndpoint)
+				.addString("punch_sync_token", punchSyncToken == null ? "" : punchSyncToken)
+				.addString("last_transition", lastTransition == null ? "" : lastTransition)
+				.addString("updated_at", now)
+				.addNumber("punch_window_ms", Math.max(0, punchWindowMs));
+
+		if (punchWindowOpenedAt != null && !punchWindowOpenedAt.isBlank()) {
+			bodyBuilder.addString("punch_window_opened_at", punchWindowOpenedAt);
+		}
+
+		String body = bodyBuilder.build();
+		HttpRequest request = SupabaseRestClient.buildAuthorizedJsonRequest(
+				endpoint,
+				"POST",
+				loadedAuth.supabaseKey(),
+				body,
+				REQUEST_TIMEOUT,
+				"resolution=merge-duplicates,return=minimal"
+		);
+
+		try {
+			HttpResponse<Void> response = SupabaseRestClient.sendDiscarding(request);
+			int status = response.statusCode();
+			SupabaseRestClient.ResponseCategory category = SupabaseRestClient.classifyPeerAttempts(status);
+			if (category == SupabaseRestClient.ResponseCategory.SUCCESS) {
+				return;
+			}
+
+			if (category == SupabaseRestClient.ResponseCategory.ENDPOINT_UNAVAILABLE && !peerAttemptsUnavailableLogged) {
+				peerAttemptsUnavailableLogged = true;
+				NatTraversalMod.LOGGER.info(
+						"[nat-traversal-mod] quic_peer_attempts sync fields unavailable. status={}",
+						status
+				);
+			}
+			if (category == SupabaseRestClient.ResponseCategory.ENDPOINT_UNAVAILABLE) {
+				return;
+			}
+
+			NatTraversalMod.LOGGER.info(
+					"[nat-traversal-mod] quic_peer_attempts sync upsert failed. status={}, room_name='{}', attempt_id='{}'",
+					status,
+					roomName,
+					attemptId
+			);
+		} catch (IOException | InterruptedException exception) {
+			if (exception instanceof InterruptedException) {
+				Thread.currentThread().interrupt();
+			}
+			NatTraversalMod.LOGGER.info(
+					"[nat-traversal-mod] quic_peer_attempts sync upsert exception. room_name='{}', attempt_id='{}'",
+					roomName,
+					attemptId,
+					exception
+			);
+		}
+	}
+
 	private static String normalizeNatType(String natType) {
 		String normalized = natType == null ? "" : natType.trim().toLowerCase();
 		if (normalized.equals("open") || normalized.equals("port_restricted") || normalized.equals("symmetric")) {
@@ -284,6 +479,26 @@ public final class SupabaseQuicSessionClient {
 	private static Optional<String> extractAttemptId(String responseBody) {
 		return JsonRegexDtoParser.findStringField(responseBody, "attempt_id")
 				.filter(attemptId -> !attemptId.isEmpty());
+	}
+
+	private static int parseWindowMs(String body) {
+		Matcher matcher = PUNCH_WINDOW_MS_PATTERN.matcher(body);
+		if (!matcher.find()) {
+			return 0;
+		}
+		return parsePositiveInt(matcher.group(1)).orElse(0);
+	}
+
+	private static Optional<Integer> parsePositiveInt(String value) {
+		if (value == null || value.isBlank()) {
+			return Optional.empty();
+		}
+		try {
+			int parsed = Integer.parseInt(value.trim());
+			return Optional.of(Math.max(0, parsed));
+		} catch (NumberFormatException exception) {
+			return Optional.empty();
+		}
 	}
 
 
@@ -336,6 +551,17 @@ public final class SupabaseQuicSessionClient {
 	}
 
 	private record SupabaseAuth(String supabaseUrl, String supabaseKey) {
+	}
+
+	public record PeerPunchSyncInfo(
+			String clientKey,
+			String clientPublicEndpoint,
+			String attemptId,
+			String punchSyncToken,
+			String punchWindowOpenedAt,
+			int punchWindowMs,
+			String lastTransition
+	) {
 	}
 }
 

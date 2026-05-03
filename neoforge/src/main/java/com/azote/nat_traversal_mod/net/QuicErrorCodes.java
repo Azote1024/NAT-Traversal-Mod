@@ -7,6 +7,8 @@ final class QuicErrorCodes {
     static final String TLS_FAILED = "tls_failed";
     static final String CONNECT_FAILED = "connect_failed";
     static final String STREAM_FAILED = "stream_failed";
+    static final String NO_RETURN_TRAFFIC = "no_return_traffic";
+    static final String SYNC_MISS = "sync_miss";
 
     private QuicErrorCodes() {
     }
@@ -34,7 +36,7 @@ final class QuicErrorCodes {
 
     static String classifyDirectConnectError(Throwable throwable) {
         if (throwable == null) {
-            return CONNECT_FAILED;
+            return NO_RETURN_TRAFFIC;
         }
 
         String text = throwable.toString().toLowerCase();
@@ -43,6 +45,9 @@ final class QuicErrorCodes {
         }
         if (containsAny(text, "cert", "tls", "ssl")) {
             return TLS_FAILED;
+        }
+        if (containsAny(text, "timed out", "timeout", "no route to host", "network is unreachable")) {
+            return NO_RETURN_TRAFFIC;
         }
         return CONNECT_FAILED;
     }

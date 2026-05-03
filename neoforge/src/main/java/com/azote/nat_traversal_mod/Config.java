@@ -31,6 +31,10 @@ public class Config {
             .comment("Only this exact host is intercepted")
             .define("mode.intercept_host", "play.mc.local");
 
+    private static final ModConfigSpec.BooleanValue DEBUG_FORCE_LOCALHOST_VALUE = CLIENT_BUILDER
+            .comment("Debug only: force resolved connect host to localhost after intercept+room resolve")
+            .define("mode.debug_force_localhost", false);
+
     private static final ModConfigSpec.ConfigValue<String> PUBLISH_HOST_NAME_VALUE = SERVER_BUILDER
             .comment("Server-side publish host_name")
             .define("publish.host_name", "host");
@@ -70,7 +74,7 @@ public class Config {
 
     private static final ModConfigSpec.ConfigValue<String> RELAY_STATUS_VALUE = SERVER_BUILDER
             .comment("Relay status: ready or down")
-            .define("relay.status", "down");
+            .define("relay.status", "ready");
 
     private static final ModConfigSpec.ConfigValue<String> QUIC_PUBLISH_ENDPOINT_VALUE = SERVER_BUILDER
             .comment("QUIC endpoint written to rooms (publicly reachable host:port)")
@@ -143,6 +147,10 @@ public class Config {
         return getClientStringOrDefault(INTERCEPT_HOST_VALUE, "play.mc.local");
     }
 
+    public static boolean modeDebugForceLocalhost() {
+        return getClientBooleanOrDefault(DEBUG_FORCE_LOCALHOST_VALUE, false);
+    }
+
     public static String modeRoomName() {
         return ROOM_NAME_VALUE.get().trim();
     }
@@ -156,15 +164,15 @@ public class Config {
     }
 
     public static String publishHostName() {
-        return PUBLISH_HOST_NAME_VALUE.get().trim();
+        return getServerStringOrDefault(PUBLISH_HOST_NAME_VALUE, "host");
     }
 
     public static String publishHostIp() {
-        return PUBLISH_HOST_IP_VALUE.get().trim();
+        return getServerStringOrDefault(PUBLISH_HOST_IP_VALUE, "");
     }
 
     public static String relayPublishEndpoint() {
-        return RELAY_PUBLISH_ENDPOINT_VALUE.get().trim();
+        return getServerStringOrDefault(RELAY_PUBLISH_ENDPOINT_VALUE, "");
     }
 
     public static String relayConnectEndpointClient() {
@@ -172,7 +180,7 @@ public class Config {
     }
 
     public static String relayConnectEndpointServer() {
-        return RELAY_CONNECT_ENDPOINT_SERVER_VALUE.get().trim();
+        return getServerStringOrDefault(RELAY_CONNECT_ENDPOINT_SERVER_VALUE, "");
     }
 
     public static String relayToken() {
@@ -180,7 +188,7 @@ public class Config {
     }
 
     public static String relayStatus() {
-        return RELAY_STATUS_VALUE.get().trim();
+        return getServerStringOrDefault(RELAY_STATUS_VALUE, "ready");
     }
 
     public static boolean relayEnabled() {
@@ -208,11 +216,11 @@ public class Config {
     }
 
     public static String quicPublishEndpoint() {
-        return QUIC_PUBLISH_ENDPOINT_VALUE.get().trim();
+        return getServerStringOrDefault(QUIC_PUBLISH_ENDPOINT_VALUE, "");
     }
 
     public static String quicStatus() {
-        return QUIC_STATUS_VALUE.get().trim();
+        return getServerStringOrDefault(QUIC_STATUS_VALUE, "down");
     }
 
     public static String quicTlsModeName() {
@@ -224,11 +232,11 @@ public class Config {
     }
 
     public static String quicTlsCertFile() {
-        return QUIC_TLS_CERT_FILE_VALUE.get().trim();
+        return getServerStringOrDefault(QUIC_TLS_CERT_FILE_VALUE, "");
     }
 
     public static String quicTlsKeyFile() {
-        return QUIC_TLS_KEY_FILE_VALUE.get().trim();
+        return getServerStringOrDefault(QUIC_TLS_KEY_FILE_VALUE, "");
     }
 
     public static String quicCertFingerprintSha256() {
@@ -275,6 +283,15 @@ public class Config {
             return value.get().trim();
         } catch (IllegalStateException ignored) {
             // Dedicated server startup can access client-only config values before client config is loaded.
+            return defaultValue;
+        }
+    }
+
+    private static String getServerStringOrDefault(ModConfigSpec.ConfigValue<String> value, String defaultValue) {
+        try {
+            return value.get().trim();
+        } catch (IllegalStateException ignored) {
+            // Client-side early connect path can access server-only config values before server config is loaded.
             return defaultValue;
         }
     }

@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 final class RoomSnapshotParser {
     private static final Pattern HOST_IP_PATTERN = Pattern.compile("\"host_ip\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern HOST_PORT_PATTERN = Pattern.compile("\"host_port\"\\s*:\\s*(\\d+)");
+    private static final Pattern HOST_NAT_TYPE_PATTERN = Pattern.compile("\"host_nat_type\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern UPDATED_AT_PATTERN = Pattern.compile("\"updated_at\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern PUBLIC_ENDPOINT_PATTERN = Pattern.compile("\"public_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern RELAY_ENDPOINT_PATTERN = Pattern.compile("\"relay_endpoint\"\\s*:\\s*\"([^\"]*)\"");
@@ -62,8 +63,17 @@ final class RoomSnapshotParser {
         Optional<String> publicEndpoint = findPublicEndpoint(body);
         Optional<String> relayEndpoint = findRelayEndpoint(body);
         Optional<String> relayStatus = findRelayStatus(body);
+        String hostNatType = normalizeHostNatType(findFirst(HOST_NAT_TYPE_PATTERN, body).orElse(""));
 
-        return Optional.of(new RoomSnapshot(body, hostIp.get(), hostPort, updatedAt, publicEndpoint, relayEndpoint, relayStatus));
+        return Optional.of(new RoomSnapshot(body, hostIp.get(), hostPort, hostNatType, updatedAt, publicEndpoint, relayEndpoint, relayStatus));
+    }
+
+    private static String normalizeHostNatType(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase();
+        if (normalized.equals("open") || normalized.equals("port_restricted") || normalized.equals("symmetric")) {
+            return normalized;
+        }
+        return "unknown";
     }
 
     private static Optional<String> findPublicEndpoint(String body) {
@@ -90,6 +100,7 @@ final class RoomSnapshotParser {
             String rawBody,
             String hostIp,
             int hostPort,
+            String hostNatType,
             Instant updatedAt,
             Optional<String> publicEndpoint,
             Optional<String> relayEndpoint,

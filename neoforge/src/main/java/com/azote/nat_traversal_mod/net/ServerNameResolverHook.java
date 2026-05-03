@@ -25,6 +25,11 @@ public final class ServerNameResolverHook {
     }
 
     public static Optional<ResolvedServerAddress> resolveAddressOverride(ServerAddress address) {
+        // Keep pinger and other non-connect paths out of NAT route orchestration.
+        if (!isServerConnectorThread()) {
+            return Optional.empty();
+        }
+
         RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         String interceptRule = runtimeConfig.interceptHost();
         if (interceptRule.isBlank()) {
@@ -60,7 +65,7 @@ public final class ServerNameResolverHook {
             return Optional.empty();
         }
 
-        return Optional.of(applyResolvedTarget(requestedHost, requestedPort, maybeTarget.get()));
+        return Optional.of(applyResolvedTarget(requestedHost, requestedPort, runtimeConfig, maybeTarget.get()));
     }
 
     private static PlannedStageResult handlePlannedStage(String requestedHost, int requestedPort, RuntimeConfigSnapshot runtimeConfig) {
@@ -137,16 +142,23 @@ public final class ServerNameResolverHook {
         ));
     }
 
-    private static ResolvedServerAddress applyResolvedTarget(String requestedHost, int requestedPort, ResolvedTarget target) {
+    private static ResolvedServerAddress applyResolvedTarget(
+            String requestedHost,
+            int requestedPort,
+            RuntimeConfigSnapshot runtimeConfig,
+            ResolvedTarget target
+    ) {
         String connectHost = target.hostIp();
-        if (isLoopbackHost(requestedHost)) {
+        boolean forceLocalhost = runtimeConfig.debugForceLocalhost();
+        if (forceLocalhost || isLoopbackHost(requestedHost)) {
             connectHost = "127.0.0.1";
         }
 
         NatTraversalMod.LOGGER.info(
-                "[nat-traversal-mod] Resolved room target. {}:{}",
+                "[nat-traversal-mod] Resolved room target. {}:{} (debug_force_localhost={})",
                 connectHost,
-                target.hostPort()
+                target.hostPort(),
+                forceLocalhost
         );
 
         String attemptId = QuicDirectRouteContext.currentAttemptId().orElse("");

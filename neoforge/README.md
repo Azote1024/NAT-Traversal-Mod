@@ -83,10 +83,12 @@ Set-Location ".\neoforge"
 ### `nat_traversal_mod-server.toml`
 
 - `publish.host_name`, `publish.host_ip`: host metadata published to room
+  - when `stun.enabled=true` and STUN succeeds, `publish.host_ip` is auto-overridden by the detected public IP (configured value is used as fallback)
 - `relay.publish_endpoint`: relay endpoint advertised to peers
 - `relay.connect_endpoint`: relay endpoint host side connector actually dials
 - `quic.publish_endpoint`: QUIC endpoint published for peer attempts
 - `quic.cert_file`, `quic.key_file`: required only when using QUIC server tunnel with certificate mode
+  - Example: `quic/cert.pem`, `quic/key.pem` (resolved relative to `run/config`)
 
 ### `nat_traversal_mod-client.toml`
 
@@ -125,4 +127,7 @@ Recommended: use a symbolic host (for example `play.mc.local`) for `mode.interce
 - `mode.connect_strategy` supports `tcp_only`, `quic_first`, `relay_first`, `tcp_quic_relay`.
 - `quic.tls_mode=ca_or_pinned` uses CA validation and accepts self-signed only when `quic.cert_fingerprint_sha256` matches.
 - `quic.tls_mode=insecure_trust_all` is for development only.
+- With `quic.tls_mode=insecure_trust_all`, `quic.cert_fingerprint_sha256` can stay empty.
+- For tethered/external relay fallback tests, `relay.connect_endpoint` must be reachable from external clients.
+- If `quic.publish_endpoint` uses a non-forwarded port, QUIC direct failure is expected; relay fallback is the primary success path.
 

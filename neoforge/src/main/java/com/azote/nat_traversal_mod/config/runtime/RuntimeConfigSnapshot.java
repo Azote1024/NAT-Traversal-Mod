@@ -3,6 +3,7 @@ package com.azote.nat_traversal_mod.config.runtime;
 public record RuntimeConfigSnapshot(
         ConnectStrategy connectStrategy,
         String interceptHost,
+        boolean debugForceLocalhost,
         String roomName,
         String supabaseUrl,
         String supabaseApiKey,

@@ -83,10 +83,12 @@ Set-Location ".\neoforge"
 ### `nat_traversal_mod-server.toml`
 
 - `publish.host_name`, `publish.host_ip`: roomに出すホスト情報
+  - `stun.enabled=true` かつ STUN 取得成功時は、`publish.host_ip` は取得した公開IPで自動上書きされます（設定値はフォールバック）。
 - `relay.publish_endpoint`: peer に提示する relay 到達先
 - `relay.connect_endpoint`: ホスト側 relay コネクタが実際に接続する先
 - `quic.publish_endpoint`: QUIC P2P 試行用に公開する先
 - `quic.cert_file`, `quic.key_file`: 証明書モードでQUICサーバートンネルを使う場合に必要
+  - 例: `quic/cert.pem`, `quic/key.pem`（`run/config` 基準の相対パス）
 
 ### `nat_traversal_mod-client.toml`
 
@@ -125,5 +127,8 @@ Set-Location ".\neoforge"
 - `mode.connect_strategy` は `tcp_only` / `quic_first` / `relay_first` / `tcp_quic_relay`
 - `quic.tls_mode=ca_or_pinned` は CA 検証に加え、`quic.cert_fingerprint_sha256` 一致時のみ自己署名を許可
 - `quic.tls_mode=insecure_trust_all` は開発用途のみ
+- `quic.tls_mode=insecure_trust_all` の場合、`quic.cert_fingerprint_sha256` は空でも動作
+- テザリング等の外部検証で relay を使う場合、`relay.connect_endpoint` は外部クライアントから到達可能なアドレスである必要があります
+- `quic.publish_endpoint` が外部未公開ポートの場合、QUIC直結失敗は想定内（relayフォールバックで接続成立を目標）
 
 

@@ -14,6 +14,7 @@ import java.util.Optional;
 
 public final class RelayClientConnectorManager {
     private static volatile boolean started;
+    private static volatile long relayUnreachableUntilMs;
 
     private RelayClientConnectorManager() {
     }
@@ -47,6 +48,41 @@ public final class RelayClientConnectorManager {
         started = true;
         NatTraversalMod.LOGGER.info("[nat-traversal-mod] Relay client connector started on 127.0.0.1:{}", localPort);
         return true;
+    }
+
+    public static boolean isRelayUpstreamReachable(int timeoutMs) {
+        RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
+        if (!runtimeConfig.relayClientConnectorEnabled()) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now < relayUnreachableUntilMs) {
+            return false;
+        }
+
+        Optional<RelayEndpoint> endpoint = RelayEndpoint.parse(runtimeConfig.relayConnectEndpointClient(), "relay.connect_endpoint");
+        if (endpoint.isEmpty()) {
+            return false;
+        }
+
+        int normalizedTimeoutMs = Math.max(200, Math.min(timeoutMs, 1500));
+        Socket probe = new Socket();
+        try {
+            probe.connect(new InetSocketAddress(endpoint.get().host(), endpoint.get().port()), normalizedTimeoutMs);
+            return true;
+        } catch (IOException exception) {
+            // Short cooldown prevents tight retry loops when relay is clearly unreachable.
+            relayUnreachableUntilMs = System.currentTimeMillis() + 3000L;
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] Relay upstream is unreachable for fallback probe. endpoint='{}:{}', cooldown_ms=3000",
+                    endpoint.get().host(),
+                    endpoint.get().port()
+            );
+            return false;
+        } finally {
+            RelayIoBridge.closeQuietly(probe);
+        }
     }
 
     private static void runLoop(int localPort) {

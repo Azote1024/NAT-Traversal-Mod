@@ -5,11 +5,13 @@ import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigLoader;
 import com.azote.nat_traversal_mod.config.runtime.RuntimeConfigSnapshot;
 import com.azote.nat_traversal_mod.net.supabase.SupabaseQuicSessionClient;
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.incubator.codec.quic.InsecureQuicTokenHandler;
 import io.netty.incubator.codec.quic.QuicCongestionControlAlgorithm;
@@ -29,6 +31,9 @@ import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,6 +50,17 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
     private volatile boolean running;
     private volatile int targetServerPort;
     private final AtomicBoolean establishedMarked = new AtomicBoolean(false);
+    private volatile boolean hostPunchAssistRunning;
+    private Thread hostPunchAssistThread;
+    private volatile String lastPunchAssistKey = "";
+    private volatile long lastPunchAssistSentAtMillis;
+    private volatile String hostObservedPublicEndpoint = "";
+    private volatile String hostPublishedEndpoint = "";
+    private volatile long hostObservedUpdatedAtMillis;
+    private volatile boolean hostStunEnabled;
+    private volatile String hostStunServer = "";
+    private volatile int hostStunTimeoutMs;
+    private volatile RelayEndpoint hostBindTarget;
 
     @Override
     public synchronized void start(int serverPort) {
@@ -110,6 +126,7 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
             udpChannel = bindUdpChannel(codec, bindTarget);
 
             running = true;
+            startHostPunchAssist(runtimeConfig.roomName(), runtimeConfig, bindTarget);
             SupabaseQuicSessionClient.markHostPunchProbing(runtimeConfig.roomName());
             String attemptId = currentAttemptId(runtimeConfig.roomName());
             NatTraversalMod.LOGGER.info(
@@ -224,6 +241,18 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
     @Override
     public synchronized void stop() {
         running = false;
+        hostPunchAssistRunning = false;
+        if (hostPunchAssistThread != null) {
+            hostPunchAssistThread.interrupt();
+            hostPunchAssistThread = null;
+        }
+        hostObservedPublicEndpoint = "";
+        hostPublishedEndpoint = "";
+        hostObservedUpdatedAtMillis = 0L;
+        hostStunEnabled = false;
+        hostStunServer = "";
+        hostStunTimeoutMs = 0;
+        hostBindTarget = null;
         establishedMarked.set(false);
         RuntimeConfigSnapshot runtimeConfig = RuntimeConfigLoader.load();
         SupabaseQuicSessionClient.markHostPunchDown(runtimeConfig.roomName());
@@ -290,13 +319,25 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         Set<Path> candidates = new LinkedHashSet<>();
         Path userDir = Path.of(System.getProperty("user.dir", "."));
         Path gameDir = FMLPaths.GAMEDIR.get();
+        Path configDir = FMLPaths.CONFIGDIR.get();
         candidates.add(userDir.resolve(rawPath));
         candidates.add(gameDir.resolve(rawPath));
+        candidates.add(configDir.resolve(rawPath));
+        candidates.add(gameDir.resolve("config").resolve(rawPath));
 
         Path runStripped = stripRunPrefix(rawPath);
         if (runStripped != null) {
             candidates.add(userDir.resolve(runStripped));
             candidates.add(gameDir.resolve(runStripped));
+            candidates.add(configDir.resolve(runStripped));
+            candidates.add(gameDir.resolve("config").resolve(runStripped));
+        }
+
+        Path configStripped = stripConfigPrefix(rawPath);
+        if (configStripped != null) {
+            candidates.add(configDir.resolve(configStripped));
+            candidates.add(gameDir.resolve("config").resolve(configStripped));
+            candidates.add(userDir.resolve(configStripped));
         }
 
         for (Path candidate : candidates) {
@@ -321,8 +362,269 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
         return path.subpath(1, path.getNameCount());
     }
 
+    private static Path stripConfigPrefix(Path path) {
+        if (path.getNameCount() < 2) {
+            return null;
+        }
+        String first = path.getName(0).toString();
+        if (!"config".equalsIgnoreCase(first)) {
+            return null;
+        }
+        return path.subpath(1, path.getNameCount());
+    }
+
     private static String currentAttemptId(String roomName) {
         return SupabaseQuicSessionClient.fetchCurrentAttemptId(roomName).orElse("");
+    }
+
+    private synchronized void startHostPunchAssist(String roomName, RuntimeConfigSnapshot runtimeConfig, RelayEndpoint bindTarget) {
+        hostPunchAssistRunning = true;
+        lastPunchAssistKey = "";
+        lastPunchAssistSentAtMillis = 0L;
+        hostStunEnabled = runtimeConfig.stunEnabled();
+        hostStunServer = runtimeConfig.stunServer();
+        hostStunTimeoutMs = runtimeConfig.stunTimeoutMs();
+        hostBindTarget = bindTarget;
+        hostPublishedEndpoint = bindTarget.host() + ":" + bindTarget.port();
+        hostObservedPublicEndpoint = resolveHostObservedPublicEndpoint(runtimeConfig, bindTarget, udpChannel);
+        hostObservedUpdatedAtMillis = System.currentTimeMillis();
+        hostPunchAssistThread = new Thread(() -> runHostPunchAssistLoop(roomName), "nat-quic-host-punch-assist");
+        hostPunchAssistThread.setDaemon(true);
+        hostPunchAssistThread.start();
+    }
+
+    private void runHostPunchAssistLoop(String roomName) {
+        int attempts = 0;
+        while (running && hostPunchAssistRunning && attempts < 20) {
+            attempts++;
+            try {
+                Optional<SupabaseQuicSessionClient.PeerPunchSyncInfo> syncInfo =
+                        SupabaseQuicSessionClient.fetchLatestPeerPunchSyncInfo(roomName);
+                if (syncInfo.isPresent()) {
+                    maybeSendHostPunchAssist(roomName, syncInfo.get());
+                }
+                Thread.sleep(150L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    private void maybeSendHostPunchAssist(String roomName, SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
+        String clientEndpointRaw = syncInfo.clientPublicEndpoint();
+        String clientKey = syncInfo.clientKey() == null ? "" : syncInfo.clientKey();
+        String attemptId = syncInfo.attemptId() == null ? "" : syncInfo.attemptId();
+        if (clientKey.isBlank() || attemptId.isBlank()) {
+            return;
+        }
+
+        if (isPunchWindowNotOpenedYet(syncInfo)) {
+            return;
+        }
+
+        refreshHostObservedEndpointIfStale(syncInfo);
+
+        Optional<RelayEndpoint> parsedClientEndpoint = RelayEndpoint.parse(clientEndpointRaw, "client_public_endpoint");
+        if (parsedClientEndpoint.isEmpty()) {
+            SupabaseQuicSessionClient.upsertPeerAttemptSync(
+                    roomName,
+                    clientKey,
+                    attemptId,
+                    clientEndpointRaw,
+                    hostObservedPublicEndpoint,
+                    syncInfo.punchSyncToken(),
+                    syncInfo.punchWindowOpenedAt(),
+                    syncInfo.punchWindowMs(),
+                    withHostEndpointContext("host_assist_invalid_client_endpoint")
+            );
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] quic_punch phase=host_assist_skip error_code=invalid_client_public_endpoint room_name='{}' attempt_id='{}' endpoint='{}'",
+                    roomName,
+                    attemptId,
+                    clientEndpointRaw
+            );
+            return;
+        }
+
+        String assistKey = attemptId + "|" + syncInfo.punchSyncToken() + "|" + syncInfo.punchWindowOpenedAt();
+        long nowMillis = System.currentTimeMillis();
+        if (assistKey.equals(lastPunchAssistKey) && (nowMillis - lastPunchAssistSentAtMillis) < 450L) {
+            return;
+        }
+
+        if (isPunchWindowExpired(syncInfo)) {
+            SupabaseQuicSessionClient.upsertPeerAttemptSync(
+                    roomName,
+                    clientKey,
+                    attemptId,
+                    clientEndpointRaw,
+                    hostObservedPublicEndpoint,
+                    syncInfo.punchSyncToken(),
+                    syncInfo.punchWindowOpenedAt(),
+                    syncInfo.punchWindowMs(),
+                    QuicErrorCodes.SYNC_MISS
+            );
+            lastPunchAssistKey = assistKey;
+            lastPunchAssistSentAtMillis = nowMillis;
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] quic_punch phase=host_assist_skip error_code=sync_miss room_name='{}' attempt_id='{}' window_opened_at='{}' window_ms={}",
+                    roomName,
+                    attemptId,
+                    syncInfo.punchWindowOpenedAt(),
+                    syncInfo.punchWindowMs()
+            );
+            return;
+        }
+
+        String payload = "NAT-PUNCH-HOST " + roomName + " " + attemptId + " " + syncInfo.punchSyncToken();
+        sendHostPunchBurst(parsedClientEndpoint.get(), payload);
+        SupabaseQuicSessionClient.upsertPeerAttemptSync(
+                roomName,
+                clientKey,
+                attemptId,
+                clientEndpointRaw,
+                hostObservedPublicEndpoint,
+                syncInfo.punchSyncToken(),
+                syncInfo.punchWindowOpenedAt(),
+                syncInfo.punchWindowMs(),
+                withHostEndpointContext("host_assist_sent")
+        );
+        lastPunchAssistKey = assistKey;
+        lastPunchAssistSentAtMillis = nowMillis;
+        NatTraversalMod.LOGGER.info(
+                "[nat-traversal-mod] quic_punch phase=host_assist_sent room_name='{}' attempt_id='{}' endpoint='{}:{}' host_published_endpoint='{}' host_observed_public_endpoint='{}' window_ms={}",
+                roomName,
+                attemptId,
+                parsedClientEndpoint.get().host(),
+                parsedClientEndpoint.get().port(),
+                hostPublishedEndpoint,
+                hostObservedPublicEndpoint,
+                syncInfo.punchWindowMs()
+        );
+    }
+
+    private static boolean isPunchWindowExpired(SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
+        if (syncInfo.punchWindowOpenedAt() == null || syncInfo.punchWindowOpenedAt().isBlank()) {
+            return false;
+        }
+        if (syncInfo.punchWindowMs() <= 0) {
+            return false;
+        }
+        try {
+            Instant openedAt = Instant.parse(syncInfo.punchWindowOpenedAt());
+            Instant deadline = openedAt.plusMillis(syncInfo.punchWindowMs());
+            return Instant.now().isAfter(deadline);
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    private static boolean isPunchWindowNotOpenedYet(SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
+        if (syncInfo.punchWindowOpenedAt() == null || syncInfo.punchWindowOpenedAt().isBlank()) {
+            return false;
+        }
+        try {
+            Instant openedAt = Instant.parse(syncInfo.punchWindowOpenedAt());
+            return Instant.now().isBefore(openedAt);
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    private void refreshHostObservedEndpointIfStale(SupabaseQuicSessionClient.PeerPunchSyncInfo syncInfo) {
+        if (!hostStunEnabled || hostBindTarget == null || hostStunServer.isBlank()) {
+            return;
+        }
+        if (syncInfo.punchWindowOpenedAt() == null || syncInfo.punchWindowOpenedAt().isBlank()) {
+            return;
+        }
+
+        long windowOpenedAtMillis;
+        try {
+            windowOpenedAtMillis = Instant.parse(syncInfo.punchWindowOpenedAt()).toEpochMilli();
+        } catch (DateTimeParseException exception) {
+            return;
+        }
+
+        // If observed endpoint was captured long before this sync window, refresh it.
+        if (hostObservedUpdatedAtMillis + 400L >= windowOpenedAtMillis) {
+            return;
+        }
+
+        RuntimeConfigSnapshot snapshot = RuntimeConfigLoader.load();
+        String refreshed = resolveHostObservedPublicEndpoint(snapshot, hostBindTarget, udpChannel);
+        if (!refreshed.isBlank() && !refreshed.equals(hostObservedPublicEndpoint)) {
+            NatTraversalMod.LOGGER.info(
+                    "[nat-traversal-mod] quic_punch phase=host_observed_refresh old='{}' new='{}'",
+                    hostObservedPublicEndpoint,
+                    refreshed
+            );
+            hostObservedPublicEndpoint = refreshed;
+        }
+        hostObservedUpdatedAtMillis = System.currentTimeMillis();
+    }
+
+    private static String resolveHostObservedPublicEndpoint(RuntimeConfigSnapshot runtimeConfig, RelayEndpoint bindTarget, Channel udpChannel) {
+        String fallback = bindTarget.host() + ":" + bindTarget.port();
+        if (!runtimeConfig.stunEnabled()) {
+            return fallback;
+        }
+
+        Optional<String> socketProbedEndpoint = QuicSocketStunProbe.resolvePublicEndpoint(
+                udpChannel,
+                runtimeConfig.stunServer(),
+                runtimeConfig.stunTimeoutMs()
+        );
+        if (socketProbedEndpoint.isPresent()) {
+            Optional<RelayEndpoint> parsed = RelayEndpoint.parse(socketProbedEndpoint.get(), "host_public_endpoint_socket");
+            if (parsed.isPresent()) {
+                String resolved = parsed.get().host() + ":" + parsed.get().port();
+                NatTraversalMod.LOGGER.info(
+                        "[nat-traversal-mod] quic_punch phase=host_public_endpoint_resolved source='socket_stun' endpoint='{}'",
+                        resolved
+                );
+                return resolved;
+            }
+        }
+
+        Optional<String> fallbackStunEndpoint = StunClient.resolvePublicEndpoint(runtimeConfig.stunServer(), runtimeConfig.stunTimeoutMs());
+        if (fallbackStunEndpoint.isEmpty()) {
+            return fallback;
+        }
+        Optional<RelayEndpoint> parsedFallback = RelayEndpoint.parse(fallbackStunEndpoint.get(), "host_public_endpoint_fallback");
+        if (parsedFallback.isEmpty()) {
+            return fallback;
+        }
+        String resolved = parsedFallback.get().host() + ":" + parsedFallback.get().port();
+        NatTraversalMod.LOGGER.info(
+                "[nat-traversal-mod] quic_punch phase=host_public_endpoint_resolved source='standalone_stun' endpoint='{}'",
+                resolved
+        );
+        return resolved;
+    }
+
+    private String withHostEndpointContext(String baseTransition) {
+        return baseTransition
+                + "|published=" + hostPublishedEndpoint
+                + "|observed=" + hostObservedPublicEndpoint;
+    }
+
+    private void sendHostPunchBurst(RelayEndpoint endpoint, String payload) {
+        if (udpChannel == null) {
+            return;
+        }
+        byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+        for (int i = 0; i < 3; i++) {
+            DatagramPacket packet = new DatagramPacket(Unpooled.wrappedBuffer(bytes), new InetSocketAddress(endpoint.host(), endpoint.port()));
+            udpChannel.writeAndFlush(packet);
+            try {
+                Thread.sleep(40L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 }
 

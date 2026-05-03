@@ -66,6 +66,7 @@ public final class SupabaseRoomsClient {
         boolean isFresh = ageMillis >= 0L && ageMillis <= ROOM_FRESHNESS_TTL_MILLIS;
         ConnectStrategy strategy = runtimeConfig.connectStrategy();
         boolean quicCapable = strategy == ConnectStrategy.QUIC_FIRST || strategy == ConnectStrategy.TCP_QUIC_RELAY;
+        String hostNatType = snapshot.hostNatType();
         if (!isFresh) {
             if (!quicCapable) {
                 NatTraversalMod.LOGGER.warn(
@@ -95,6 +96,23 @@ public final class SupabaseRoomsClient {
         }
 
         if (quicCapable) {
+            if ("symmetric".equals(hostNatType)) {
+                SupabaseQuicSessionClient.markRouteDecisionRelayForced(roomName);
+                NatTraversalMod.LOGGER.info(
+                        "[nat-traversal-mod] host_nat_type=symmetric. Skip QUIC direct and force relay-first fallback. room_name='{}'",
+                        roomName
+                );
+                Optional<ResolvedTarget> symmetricFallback = resolveRelayThenPublic(snapshot, roomName, runtimeConfig);
+                if (symmetricFallback.isPresent()) {
+                    return symmetricFallback;
+                }
+                NatTraversalMod.LOGGER.info(
+                        "[nat-traversal-mod] symmetric fallback route unavailable. use host_ip:host_port. room_name='{}'",
+                        roomName
+                );
+                return Optional.of(new ResolvedTarget(snapshot.hostIp(), snapshot.hostPort()));
+            }
+
             SupabaseQuicSessionClient.markRouteDecisionQuicTry(roomName);
             Optional<String> quicSessionBody = SupabaseQuicSessionClient.fetchSessionBody(roomName);
             if (quicSessionBody.isPresent()) {

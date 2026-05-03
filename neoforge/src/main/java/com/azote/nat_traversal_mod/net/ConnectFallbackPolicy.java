@@ -42,6 +42,9 @@ public final class ConnectFallbackPolicy {
         if (!RelayClientConnectorManager.ensureStarted()) {
             return Optional.empty();
         }
+        if (!RelayClientConnectorManager.isRelayUpstreamReachable(500)) {
+            return Optional.empty();
+        }
         return Optional.of(new InetSocketAddress("127.0.0.1", runtimeConfig.relayClientLocalPort()));
     }
 
