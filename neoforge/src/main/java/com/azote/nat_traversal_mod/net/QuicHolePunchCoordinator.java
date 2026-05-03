@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 
 final class QuicHolePunchCoordinator {
     private static final int PUNCH_WINDOW_DELAY_MS = 600;
+    private static final Pattern HOST_PUBLIC_ENDPOINT_PATTERN = Pattern.compile("\"host_public_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_ENDPOINT_PATTERN = Pattern.compile("\"punch_endpoint\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_STATUS_PATTERN = Pattern.compile("\"punch_status\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern PUNCH_TOKEN_PATTERN = Pattern.compile("\"punch_token\"\\s*:\\s*\"([^\"]*)\"");
@@ -33,7 +34,9 @@ final class QuicHolePunchCoordinator {
             return;
         }
 
-        Optional<String> punchEndpointValue = findFirst(PUNCH_ENDPOINT_PATTERN, roomBody)
+        Optional<String> punchEndpointValue = findFirst(HOST_PUBLIC_ENDPOINT_PATTERN, roomBody)
+                .filter(value -> !value.trim().isEmpty())
+                .or(() -> findFirst(PUNCH_ENDPOINT_PATTERN, roomBody))
                 .or(() -> Optional.of(quicEndpoint.host() + ":" + quicEndpoint.port()));
         Optional<RelayEndpoint> punchEndpoint = punchEndpointValue.flatMap(value -> RelayEndpoint.parse(value.trim(), "punch_endpoint"));
         if (punchEndpoint.isEmpty()) {

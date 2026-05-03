@@ -230,14 +230,13 @@ public final class SupabaseRoomsPublisher {
 
     private static void publishQuicSession(PublishConfig config, int hostPort, String updatedAt, NatClassification natClassification) {
         String endpoint = config.supabaseUrl + SupabaseApiPaths.QUIC_SESSIONS;
-        String defaultPunchEndpoint = natClassification.publishHostIp() + ":" + hostPort;
+        String defaultPunchEndpoint = initialQuicPunchEndpoint(config, hostPort, natClassification);
         String punchToken = buildPunchToken(config.roomName, updatedAt);
         String routeDecision = "quic_try";
         String relayReason = "";
         String body = new SupabaseJsonObjectBuilder()
                 .addString("room_name", config.roomName)
                 .addString("quic_endpoint", config.quicEndpoint)
-                .addString("host_public_endpoint", "")
                 .addString("quic_status", config.quicStatus)
                 .addString("punch_endpoint", defaultPunchEndpoint)
                 .addString("punch_status", "ready")
@@ -273,7 +272,6 @@ public final class SupabaseRoomsPublisher {
         String body = new SupabaseJsonObjectBuilder()
                 .addString("status", "closed")
                 .addString("quic_status", "down")
-                .addString("host_public_endpoint", "")
                 .addString("punch_status", "idle")
                 .addString("punch_token", "")
                 .addString("route_decision", "")
@@ -322,6 +320,22 @@ public final class SupabaseRoomsPublisher {
 
     private static String buildPunchToken(String roomName, String updatedAt) {
         return roomName + "-" + updatedAt.replace(":", "").replace("-", "").replace(".", "");
+    }
+
+    private static String initialQuicPunchEndpoint(PublishConfig config, int hostPort, NatClassification natClassification) {
+        Optional<RelayEndpoint> quicEndpoint = RelayEndpoint.parse(config.quicEndpoint, "quic.publish_endpoint");
+        if (quicEndpoint.isPresent()) {
+            String host = natClassification.publishHostIp().isBlank()
+                    ? quicEndpoint.get().host()
+                    : natClassification.publishHostIp();
+            return host + ":" + quicEndpoint.get().port();
+        }
+
+        if (!natClassification.publicEndpoint().isBlank()) {
+            return natClassification.publicEndpoint();
+        }
+
+        return natClassification.publishHostIp() + ":" + hostPort;
     }
 
     private static NatClassification classifyHostNat(PublishConfig config, int hostPort) {

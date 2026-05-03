@@ -266,6 +266,7 @@ public final class SupabaseQuicSessionClient {
 				roomName,
 				new SupabaseJsonObjectBuilder()
 						.addString("host_public_endpoint", normalizedEndpoint)
+						.addString("punch_endpoint", normalizedEndpoint)
 						.addString("updated_at", Instant.now().toString())
 						.build(),
 				"Failed to update host public endpoint"

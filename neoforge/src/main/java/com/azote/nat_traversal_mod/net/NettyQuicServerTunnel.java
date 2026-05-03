@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class NettyQuicServerTunnel implements QuicServerTunnel {
     private static final long MAX_DATA = 2_097_152L;
+    private static final long HOST_PUNCH_ASSIST_POLL_MILLIS = 300L;
 
     private EventLoopGroup eventLoopGroup;
     private Channel udpChannel;
@@ -395,19 +396,29 @@ public final class NettyQuicServerTunnel implements QuicServerTunnel {
     }
 
     private void runHostPunchAssistLoop(String roomName) {
-        int attempts = 0;
-        while (running && hostPunchAssistRunning && attempts < 20) {
-            attempts++;
+        while (running && hostPunchAssistRunning) {
             try {
                 Optional<SupabaseQuicSessionClient.PeerPunchSyncInfo> syncInfo =
                         SupabaseQuicSessionClient.fetchLatestPeerPunchSyncInfo(roomName);
                 if (syncInfo.isPresent()) {
                     maybeSendHostPunchAssist(roomName, syncInfo.get());
                 }
-                Thread.sleep(150L);
+                Thread.sleep(HOST_PUNCH_ASSIST_POLL_MILLIS);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 return;
+            } catch (RuntimeException exception) {
+                NatTraversalMod.LOGGER.warn(
+                        "[nat-traversal-mod] quic_punch phase=host_assist_loop_error room_name='{}'",
+                        roomName,
+                        exception
+                );
+                try {
+                    Thread.sleep(HOST_PUNCH_ASSIST_POLL_MILLIS);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
         }
     }
